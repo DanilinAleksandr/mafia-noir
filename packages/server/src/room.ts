@@ -27,7 +27,7 @@ import {
   submitNightAction,
   viewFor,
 } from '@mafia/engine';
-import type { GameEvent, GameState, StepResult } from '@mafia/engine';
+import type { GameEvent, GameState, StepResult, ViewOptions } from '@mafia/engine';
 import {
   CLOSE_CODES,
   ERROR_MESSAGES,
@@ -53,8 +53,8 @@ import type {
   ServerMessage,
 } from '@mafia/protocol';
 import { type PasswordHash, hashPassword, hashToken, newSeed, newToken, verifyPassword } from './crypto';
-import { compositionOf, scenesOf, stageOf } from './game-view';
-import { LIMITS_SERVER, type Member, type RoomState, type SocketAttachment } from './state';
+import { compositionOf, personalScenes, stageOf } from './game-view';
+import { LIMITS_SERVER, ROOM_STATE_VERSION, type Member, type RoomState, type SocketAttachment } from './state';
 
 export interface Env {
   ROOM: DurableObjectNamespace<Room>;
@@ -99,7 +99,14 @@ export class Room extends DurableObject<Env> {
     // Ответ на «ping» без пробуждения объекта: клиент держит соединение живым бесплатно.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
     void ctx.blockConcurrencyWhile(async () => {
-      this.room = (await ctx.storage.get<RoomState>('room')) ?? null;
+      const stored = await ctx.storage.get<RoomState>('room');
+      if (stored && stored.v !== ROOM_STATE_VERSION) {
+        // комната сохранена старой версией сервера: формат другой, продолжать её нельзя
+        await ctx.storage.deleteAlarm();
+        await ctx.storage.deleteAll();
+        return;
+      }
+      this.room = stored ?? null;
     });
   }
 
@@ -130,7 +137,7 @@ export class Room extends DurableObject<Env> {
     }
     const host: Member = { id: 'm1', name: input.name, tokenHash, joinedAt: now };
     this.room = {
-      v: 1,
+      v: ROOM_STATE_VERSION,
       code: input.code,
       createdAt: now,
       lastActivityAt: now,
@@ -146,7 +153,7 @@ export class Room extends DurableObject<Env> {
       players: [],
       rev: 0,
       step: 0,
-      morning: null,
+      sync: null,
       stageDeadline: null,
       chat: [],
       chatSeq: 0,
@@ -256,7 +263,7 @@ export class Room extends DurableObject<Env> {
     try {
       this.maybeTransferHost(now);
       if (room.stage === 'game' && room.game) {
-        if (room.morning && now >= room.morning.deadline) this.openDay();
+        if (room.sync && now >= room.sync.deadline) this.openGate();
         else if (room.stageDeadline !== null && now >= room.stageDeadline) this.forceAdvance();
       }
     } catch (error) {
@@ -446,7 +453,7 @@ export class Room extends DurableObject<Env> {
         room.stage = 'lobby';
         room.game = null;
         room.players = [];
-        room.morning = null;
+        room.sync = null;
         room.stageDeadline = null;
         room.chat = [];
         this.touchRoom();
@@ -476,14 +483,14 @@ export class Room extends DurableObject<Env> {
       }
 
       case 'ready': {
-        // опоздавший «готов» — не ошибка: день мог начаться по таймеру
-        if (room.stage !== 'game' || !room.morning || msg.step !== room.step) return;
-        if (!room.morning.ready.includes(member.id)) {
-          room.morning.ready.push(member.id);
+        // опоздавший «готов» — не ошибка: игра могла пойти дальше по таймеру
+        if (room.stage !== 'game' || !room.sync || msg.step !== room.step) return;
+        if (!room.sync.ready.includes(member.id)) {
+          room.sync.ready.push(member.id);
           this.dirty = true;
           this.gameTouched = true;
         }
-        this.maybeOpenDay();
+        this.maybeOpenGate();
         return;
       }
 
@@ -561,9 +568,9 @@ export class Room extends DurableObject<Env> {
       this.dirty = true;
     }
     this.roomTouched = true;
-    if (room.stage === 'game' && room.morning) {
+    if (room.stage === 'game' && room.sync) {
       this.gameTouched = true;
-      this.maybeOpenDay(ws);
+      this.maybeOpenGate(ws);
     }
     await this.commit(ws);
   }
@@ -592,7 +599,7 @@ export class Room extends DurableObject<Env> {
     room.stage = 'game';
     room.players = players.map((m) => m.id);
     room.game = created.state;
-    room.morning = null;
+    room.sync = null;
     room.chat = [];
     room.chatSeq = 0;
     room.step += 1;
@@ -616,15 +623,20 @@ export class Room extends DurableObject<Env> {
     const room = this.room as RoomState;
     const before = room.game as GameState;
     this.apply(result);
-    if (before.phase === 'night' && result.state.phase === 'day') {
+    const from = before.phase;
+    const to = result.state.phase;
+    if (from === 'night' && to === 'day') {
       // ночь закончилась: ждём, пока клиенты покажут её итоги
-      room.morning = { ready: [], deadline: this.now() + LIMITS_SERVER.morningMs };
+      room.sync = { kind: 'morning', ready: [], deadline: this.now() + LIMITS_SERVER.syncMs };
+    } else if (from === 'day' && to === 'night') {
+      // день закончился: ждём, пока клиенты покажут приговор
+      room.sync = { kind: 'evening', ready: [], deadline: this.now() + LIMITS_SERVER.syncMs };
     }
     room.step += 1;
     this.setStageDeadline();
     if (result.state.phase === 'ended') {
       room.stage = 'finished';
-      room.morning = null;
+      room.sync = null;
       this.roomTouched = true;
     }
   }
@@ -643,20 +655,20 @@ export class Room extends DurableObject<Env> {
     room.stageDeadline = seconds === null ? null : this.now() + seconds * 1000;
   }
 
-  /** Начать день, если готовы все, кто в сети. */
-  private maybeOpenDay(except?: WebSocket): void {
+  /** Пойти дальше (утром — начать день, вечером — ночь), если готовы все, кто в сети. */
+  private maybeOpenGate(except?: WebSocket): void {
     const room = this.room as RoomState;
-    if (!room.morning) return;
+    if (!room.sync) return;
     const online = this.onlineIds(except);
     if (online.size === 0) return;
-    const ready = room.morning.ready;
-    if ([...online].every((id) => ready.includes(id))) this.openDay();
+    const ready = room.sync.ready;
+    if ([...online].every((id) => ready.includes(id))) this.openGate();
   }
 
-  private openDay(): void {
+  private openGate(): void {
     const room = this.room as RoomState;
-    if (!room.morning) return;
-    room.morning = null;
+    if (!room.sync) return;
+    room.sync = null;
     room.step += 1;
     this.setStageDeadline();
     this.dirty = true;
@@ -678,7 +690,8 @@ export class Room extends DurableObject<Env> {
         this.resolve(resolvePendingDefault(game));
         return;
       case 'morning':
-        this.openDay();
+      case 'evening':
+        this.openGate();
         return;
       case 'ended':
         return;
@@ -710,10 +723,14 @@ export class Room extends DurableObject<Env> {
     }
   }
 
-  /** Кому сейчас виден чат мафии: живые чёрные. */
+  /** Кому сейчас виден чат мафии: живые чёрные и ведущий-наблюдатель. */
   private chatAudience(): Set<MemberId> {
-    const game = (this.room as RoomState).game;
-    return new Set(game ? game.players.filter((p) => p.alive && p.team === 'black').map((p) => p.id) : []);
+    const room = this.room as RoomState;
+    const game = room.game;
+    if (!game) return new Set();
+    const audience = new Set(game.players.filter((p) => p.alive && p.team === 'black').map((p) => p.id));
+    for (const member of room.members) if (this.seesAll(member.id)) audience.add(member.id);
+    return audience;
   }
 
   // ───────────────────────────── снимки ─────────────────────────────
@@ -800,15 +817,15 @@ export class Room extends DurableObject<Env> {
     } else if (stage === 'day' && game.day) {
       const votes = game.day.votes;
       progress = { done: alive.filter((p) => votes[p.id] !== undefined).length, total: alive.length };
-    } else if (stage === 'morning' && room.morning) {
-      const ready = room.morning.ready;
+    } else if (room.sync && (stage === 'morning' || stage === 'evening')) {
+      const ready = room.sync.ready;
       progress = { done: [...online].filter((id) => ready.includes(id)).length, total: online.size };
     }
     return {
       rev: room.rev,
       step: room.step,
       stage,
-      deadline: stage === 'morning' && room.morning ? room.morning.deadline : room.stageDeadline,
+      deadline: room.sync && (stage === 'morning' || stage === 'evening') ? room.sync.deadline : room.stageDeadline,
       serverTime: this.now(),
       display: room.settings.display,
       composition: room.settings.display === 'stealth' ? null : compositionOf(game),
@@ -820,9 +837,35 @@ export class Room extends DurableObject<Env> {
     return (this.room as RoomState).players.includes(memberId) ? memberId : null;
   }
 
+  /**
+   * Ведущий-наблюдатель — участник комнаты, который не играет в этой партии. Он видит всё:
+   * роли, журнал целиком, чужие ходы и голоса. Игрокам этого не достаётся никогда.
+   * (Не играть может только тот, кто был хостом в режиме «ведущий» на момент старта:
+   * после старта новые участники в комнату не входят.)
+   */
+  private seesAll(memberId: MemberId): boolean {
+    const room = this.room as RoomState;
+    return room.game !== null && !room.players.includes(memberId);
+  }
+
+  private viewOptions(memberId: MemberId): ViewOptions | undefined {
+    return this.seesAll(memberId) ? { seeAll: true } : undefined;
+  }
+
   private gameSnapshot(memberId: MemberId, common: Omit<GameSnapshot, 'view'>): GameSnapshot {
-    const { events: _events, ...view } = viewFor((this.room as RoomState).game as GameState, this.viewerOf(memberId));
+    const { events: _events, ...view } = viewFor(
+      (this.room as RoomState).game as GameState,
+      this.viewerOf(memberId),
+      this.viewOptions(memberId),
+    );
     return { ...common, view };
+  }
+
+  /** Личные сцены участника — только в режиме «Кино» и только игрокам. */
+  private scenesFor(memberId: MemberId, events: readonly GameEvent[]): ReturnType<typeof personalScenes> {
+    const room = this.room as RoomState;
+    if (room.settings.display !== 'cinema' || !room.game || !room.players.includes(memberId)) return [];
+    return personalScenes(room.game, events, memberId);
   }
 
   // ───────────────────────────── запись и рассылка ─────────────────────────────
@@ -862,8 +905,8 @@ export class Room extends DurableObject<Env> {
         token,
         room: this.roomSnapshot(online, member.id === room.hostId),
         game: game && common ? this.gameSnapshot(member.id, common) : null,
-        history: game ? projectEvents(game, game.log, viewer) : [],
-        scenes: game && room.settings.display === 'cinema' ? scenesOf(game, game.log) : [],
+        history: game ? projectEvents(game, game.log, viewer, this.viewOptions(member.id)) : [],
+        scenes: game ? this.scenesFor(member.id, game.log) : [],
         chat: this.chatAudience().has(member.id) ? room.chat : [],
       });
     }
@@ -877,7 +920,6 @@ export class Room extends DurableObject<Env> {
     }
 
     if (this.gameTouched && game && common) {
-      const scenes = room.settings.display === 'cinema' ? scenesOf(game, this.events) : [];
       const cache = new Map<MemberId, string>();
       for (const socket of sockets) {
         const memberId = socket.att.m;
@@ -888,8 +930,8 @@ export class Room extends DurableObject<Env> {
           text = JSON.stringify({
             t: 'game',
             game: this.gameSnapshot(memberId, common),
-            events: projectEvents(game, this.events, this.viewerOf(memberId)),
-            scenes,
+            events: projectEvents(game, this.events, this.viewerOf(memberId), this.viewOptions(memberId)),
+            scenes: this.scenesFor(memberId, this.events),
           } satisfies ServerMessage);
           cache.set(memberId, text);
         }
@@ -910,7 +952,7 @@ export class Room extends DurableObject<Env> {
     const now = this.now();
     const times = [room.idleCheckAt];
     if (room.stage === 'game') {
-      if (room.morning) times.push(room.morning.deadline);
+      if (room.sync) times.push(room.sync.deadline);
       else if (room.stageDeadline !== null) times.push(room.stageDeadline);
     }
     if (room.hostOfflineSince !== null) {

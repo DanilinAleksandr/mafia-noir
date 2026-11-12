@@ -337,3 +337,141 @@ describe('viewFor: утечек нет ни в одной фазе (случай
     });
   });
 });
+
+describe('Событие «способность применена»', () => {
+  it('записывается для каждой сработавшей способности и видно только применившему', () => {
+    const g = new Sim(['doctor', 'commissioner', 'mafia', 'civilian', 'civilian', 'civilian']);
+    g.act('doctor', 'heal', 'p4').act('commissioner', 'check', 'p3').mafia('mafia', 'p5');
+    g.night();
+    const used = g.ev('abilityUsed');
+    expect(used.map((e) => [e.actors[0], e.data.ability, e.targets])).toEqual([
+      ['p1', 'heal', ['p4']],
+      ['p2', 'check', ['p3']],
+    ]);
+    for (const event of used) {
+      expect(event.visibility).toEqual({ all: false, teams: [], players: [event.actors[0]] });
+      expect(event.stealth).toBeNull();
+    }
+    // тот, на кого подействовали, об этом не узнаёт
+    expect(g.view('p4').events.some((e) => e.type === 'abilityUsed')).toBe(false);
+    expect(g.view('p3').events.some((e) => e.type === 'abilityUsed')).toBe(false);
+    expect(g.view('p1').events.filter((e) => e.type === 'abilityUsed')).toHaveLength(1);
+  });
+
+  it('заблокированная способность и отказ событий не дают', () => {
+    const g = new Sim(['mistress', 'doctor', 'commissioner', 'mafia', 'civilian', 'civilian']);
+    g.act('mistress', 'block', 'doctor').act('doctor', 'heal', 'p5').pass('commissioner');
+    g.night();
+    expect(g.ev('abilityUsed').map((e) => e.data.ability)).toEqual(['block']);
+  });
+});
+
+describe('Убийца не раскрывается', () => {
+  it('выстрел Охотника: кто стрелял, видит только он сам', () => {
+    const g = new Sim(['hunter', 'mafia', 'civilian', 'civilian', 'civilian', 'civilian'], {
+      rules: { revealRoleOnDeath: false },
+    });
+    g.mafia('mafia', 'hunter').night();
+    g.decide('hunter', { kind: 'hunterShot', target: 'p3' });
+    const forOthers = g.view('p4').events.filter((e) => e.type === 'death');
+    expect(forOthers.map((e) => [e.targets[0], e.actors, e.data])).toEqual([
+      ['p1', [], { cause: 'mafiaKill' }],
+      ['p3', [], { cause: 'hunterShot' }],
+    ]);
+    expect(g.view('hunter').events.find((e) => e.type === 'death' && e.targets[0] === 'p3')?.actors).toEqual(['p1']);
+    expect(g.view(null).events.every((e) => e.type !== 'death' || e.actors.length === 0)).toBe(true);
+  });
+
+  it('взрыв Подрывника: кто взорвал, видит только он сам', () => {
+    const g = new Sim(['bomber', 'mafia', 'civilian', 'civilian', 'civilian', 'civilian']);
+    g.night();
+    g.vote('p3', 'bomber').vote('p4', 'bomber');
+    g.tally();
+    g.decide('bomber', { kind: 'bomberBlast', target: 'p3' });
+    const seen = g.view('p5').events.find((e) => e.type === 'death' && e.targets[0] === 'p3');
+    expect(seen).toMatchObject({ redacted: true, actors: [], data: { cause: 'bomberBlast' } });
+  });
+
+  it('в случайных партиях никто, кроме самого убийцы и его чёрной команды, не видит, кто убил', () => {
+    let deaths = 0;
+    for (let i = 0; i < 25; i++) {
+      playRandomGame(`killer-${i}`, { rules: { revealRoleOnDeath: i % 2 === 0 } }, undefined, {
+        onState: (state) => {
+          if (state.phase === 'ended') return;
+          for (const viewer of state.players) {
+            if (!viewer.alive && state.config.rules.deadSeeAllRoles) continue;
+            for (const event of viewFor(state, viewer.id).events) {
+              if (event.type !== 'death' || event.actors.length === 0) continue;
+              deaths++;
+              const own = event.actors.includes(viewer.id);
+              const team = event.data.cause === 'mafiaKill' && viewer.team === 'black';
+              expect(own || team, `killer-${i}: ${viewer.id} видит убийцу`).toBe(true);
+            }
+          }
+        },
+      });
+    }
+    expect(deaths).toBeGreaterThan(100);
+  });
+});
+
+describe('Представление ведущего (seeAll)', () => {
+  const roles: RoleId[] = ['mafia', 'don', 'doctor', 'commissioner', 'hunter', 'civilian', 'civilian'];
+
+  it('видит все роли и журнал целиком, но остаётся наблюдателем', () => {
+    const g = new Sim(roles);
+    const view = viewFor(g.state, null, { seeAll: true });
+    expect(view.viewer).toBeNull();
+    expect(view.you).toBeNull();
+    expect(view.players.map((p) => p.role)).toEqual(roles);
+    expect(view.events.map((e) => e.type)).toEqual(g.state.log.map((e) => e.type));
+    expect(view.events.every((e) => !e.redacted)).toBe(true);
+    expect(view.night?.options).toBeNull();
+    expect(view.decision).toBeNull();
+  });
+
+  it('видит чужие ночные ходы и голоса в реальном времени, а также чьего решения ждёт игра', () => {
+    const g = new Sim(roles);
+    const backstage = () => viewFor(g.state, null, { seeAll: true }).backstage;
+    expect(backstage()).toEqual({ nightMoves: {}, votes: {}, decision: null, lovers: [] });
+
+    g.mafia('mafia', 'p5').act('doctor', 'heal', 'p6');
+    expect(backstage()?.nightMoves).toEqual({
+      p1: { mafiaVote: 'p5' },
+      p3: { ability: { id: 'heal', targets: ['p6'] } },
+    });
+
+    g.night();
+    // Охотник убит: ведущий знает, что решение за ним
+    expect(backstage()?.decision).toMatchObject({ kind: 'hunterShot', playerId: 'p5' });
+    g.decide('hunter', { kind: 'hunterShot', target: null });
+
+    g.vote('p6', 'p1').vote('p7', null);
+    expect(backstage()?.votes).toEqual({ p6: 'p1', p7: null });
+    expect(backstage()?.nightMoves).toEqual({});
+  });
+
+  it('полные события доступны ведущему сразу — включая результаты проверок', () => {
+    const g = new Sim(roles);
+    g.act('commissioner', 'check', 'don').mafia('mafia', 'p6');
+    const events = g.night();
+    const seen = projectEvents(g.state, events, null, { seeAll: true });
+    expect(seen).toHaveLength(events.length);
+    expect(seen.find((e) => e.type === 'checked')).toMatchObject({ actors: ['p4'], targets: ['p2'], data: { isMafia: true } });
+    expect(seen.find((e) => e.type === 'death')?.actors).toHaveLength(1);
+    expect(projectEvent(g.state, events[0] as never, null)).toBeNull();
+    expect(projectEvent(g.state, events[0] as never, null, { seeAll: true })).not.toBeNull();
+  });
+
+  it('у игроков и у общего экрана «закулисья» нет никогда', () => {
+    for (let i = 0; i < 10; i++) {
+      playRandomGame(`backstage-${i}`, {}, undefined, {
+        onState: (state) => {
+          for (const viewer of [...state.players.map((p) => p.id), null]) {
+            expect(viewFor(state, viewer).backstage).toBeNull();
+          }
+        },
+      });
+    }
+  });
+});

@@ -145,7 +145,7 @@ function renderGame() {
   html += '<h2>Партия: ' + esc(g.stage) + ', круг ' + v.round + ', шаг ' + g.step + '</h2>';
   html += '<p>' + (g.progress ? 'Прогресс: ' + g.progress.done + ' из ' + g.progress.total + '. ' : '') + (g.deadline ? 'До конца стадии: ' + Math.max(0, Math.round((g.deadline - g.serverTime) / 1000)) + ' с. ' : 'Таймера нет. ') + (v.waitingForDecision ? 'Игра ждёт чьего-то решения.' : '') + '</p>';
   if (v.you) html += '<p>Вы: <b>' + esc(v.you.role) + '</b> (' + esc(v.you.team) + '), ' + (v.you.alive ? 'живы' : 'мертвы') + (v.you.silenced ? ', молчите сегодня' : '') + (v.you.lovers.length ? ', влюблены в: ' + esc(names(v.you.lovers)) : '') + '</p>';
-  else html += '<p>Вы наблюдатель: видите только общую картину.</p>';
+  else html += '<p>Вы ведущий-наблюдатель: видите все роли и все действия.</p>';
   if (g.composition) html += '<p>Состав партии: ' + esc(g.composition.map(function (c) { return c.role + (c.count > 1 ? ' ×' + c.count : ''); }).join(', ')) + '</p>';
 
   html += '<table border="1" cellpadding="3"><tr><th>Игрок</th><th>Жив</th><th>Роль</th><th>Примечания</th></tr>';
@@ -167,7 +167,9 @@ function renderGame() {
     if (o.mafiaVote) html += '<p>Голос мафии: <select id="mafia-vote">' + options(o.mafiaVote.candidates, 'воздержаться') + '</select> <button data-act="mafiaVote">Проголосовать</button></p>';
     html += '<p><button data-act="pass">' + (o.abilities.length ? 'Не применять способность' : 'Сделать «пустой» ход') + '</button></p>';
   }
-  if (g.stage === 'morning') html += '<h3>Утро</h3><p><button data-act="ready">Готов к началу дня</button></p>';
+  if (g.stage === 'morning') html += '<h3>Утро: итоги ночи</h3><p><button data-act="ready">Готов к началу дня</button></p>';
+  if (g.stage === 'evening') html += '<h3>Вечер: приговор</h3><p><button data-act="ready">Готов к началу ночи</button></p>';
+  if (v.backstage) html += '<h3>Закулисье (видит только ведущий)</h3><pre>' + esc(JSON.stringify(v.backstage, null, 2)) + '</pre>';
   if (g.stage === 'day' && v.day) {
     var pool = (v.day.candidates || v.players.filter(function (x) { return x.alive; }).map(function (x) { return x.id; })).filter(function (id) { return id !== S.me; });
     html += '<h3>Голосование' + (v.day.stage === 'revote' ? ' (переголосование)' : '') + '</h3><p>Проголосовали: ' + esc(names(v.day.voted)) + '. Ваш голос: ' + esc(v.day.myVote === undefined ? 'ещё нет' : nameOf(v.day.myVote)) + (v.day.ballots ? '. Все голоса: ' + esc(JSON.stringify(v.day.ballots)) : '') + '</p>';
@@ -181,14 +183,15 @@ function renderGame() {
   if (isHost() && g.stage !== 'ended') html += '<p><button data-act="advance">Хост: дальше (не ждать остальных)</button></p>';
   if (v.result) html += '<h3>Итог: ' + esc(v.result.outcome) + ' (' + esc(v.result.reason) + ')</h3><p>Победители: ' + esc(names(v.result.winners)) + '</p>';
 
-  if (v.you && v.you.team === 'black') {
+  if ((v.you && v.you.team === 'black') || v.backstage) {
     html += '<h3>Чат мафии</h3><ul>';
     for (var c = 0; c < S.chat.length; c++) html += '<li>[круг ' + S.chat[c].round + '] ' + esc(S.chat[c].name) + ': ' + esc(S.chat[c].text) + '</li>';
-    html += '</ul><p><input id="chat-text" maxlength="300" size="50"> <button data-act="chat">Отправить</button></p>';
+    html += '</ul>';
+    if (v.you) html += '<p><input id="chat-text" maxlength="300" size="50"> <button data-act="chat">Отправить</button></p>';
   }
   if (S.scenes.length) {
-    html += '<h3>Сцены («Кино»)</h3><ul>';
-    for (var s = 0; s < S.scenes.length; s++) html += '<li>круг ' + S.scenes[s].round + ': ' + esc(S.scenes[s].type) + ' — ' + esc(S.scenes[s].role || 'мафия') + '</li>';
+    html += '<h3>Кто на вас подействовал («Кино»)</h3><ul>';
+    for (var s = 0; s < S.scenes.length; s++) html += '<li>круг ' + S.scenes[s].round + ': ' + esc(S.scenes[s].role) + ' применил ' + esc(S.scenes[s].ability) + (S.scenes[s].saved ? ' — это вас спасло' : '') + '</li>';
     html += '</ul>';
   }
   $('game').innerHTML = html;

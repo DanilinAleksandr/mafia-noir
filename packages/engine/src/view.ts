@@ -18,6 +18,7 @@ import type {
   PlayerState,
   PlayerView,
   ViewEvent,
+  ViewOptions,
   ViewPlayer,
   Visibility,
 } from './types';
@@ -28,8 +29,9 @@ function matches(visibility: Visibility, viewer: PlayerState | null): boolean {
   return visibility.players.includes(viewer.id) || visibility.teams.includes(viewer.team);
 }
 
-/** Видит ли зритель вообще всё: игра окончена или он мёртв при включённом правиле. */
-function seesEverything(state: GameState, viewer: PlayerState | null): boolean {
+/** Видит ли зритель вообще всё: он ведущий, игра окончена или он мёртв при включённом правиле. */
+function seesEverything(state: GameState, viewer: PlayerState | null, options?: ViewOptions): boolean {
+  if (options?.seeAll) return true;
   if (state.phase === 'ended') return true;
   return viewer !== null && !viewer.alive && state.config.rules.deadSeeAllRoles;
 }
@@ -67,15 +69,25 @@ function project(event: GameEvent, viewer: PlayerState | null, everything: boole
  * Проекция одного события для зрителя: полное событие, скрытный вид или null (не показывать).
  * viewerId = null — общий экран.
  */
-export function projectEvent(state: GameState, event: GameEvent, viewerId: PlayerId | null): ViewEvent | null {
+export function projectEvent(
+  state: GameState,
+  event: GameEvent,
+  viewerId: PlayerId | null,
+  options?: ViewOptions,
+): ViewEvent | null {
   const viewer = viewerId === null ? null : (findPlayer(state, viewerId) ?? null);
-  return project(event, viewer, seesEverything(state, viewer));
+  return project(event, viewer, seesEverything(state, viewer, options));
 }
 
 /** Проекция списка событий (например, событий последнего шага) для зрителя. */
-export function projectEvents(state: GameState, events: readonly GameEvent[], viewerId: PlayerId | null): ViewEvent[] {
+export function projectEvents(
+  state: GameState,
+  events: readonly GameEvent[],
+  viewerId: PlayerId | null,
+  options?: ViewOptions,
+): ViewEvent[] {
   const viewer = viewerId === null ? null : (findPlayer(state, viewerId) ?? null);
-  const everything = seesEverything(state, viewer);
+  const everything = seesEverything(state, viewer, options);
   const out: ViewEvent[] = [];
   for (const event of events) {
     const projected = project(event, viewer, everything);
@@ -87,14 +99,17 @@ export function projectEvents(state: GameState, events: readonly GameEvent[], vi
 /**
  * Представление игры для игрока. viewerId = null (или неизвестный id) — общий экран:
  * только то, что известно всем.
+ *
+ * `options.seeAll` — представление ведущего-наблюдателя: все роли, журнал целиком и «закулисье»
+ * (чужие ночные ходы и голоса в реальном времени). Игрокам его давать нельзя.
  */
-export function viewFor(state: GameState, viewerId: PlayerId | null): PlayerView {
+export function viewFor(state: GameState, viewerId: PlayerId | null, options?: ViewOptions): PlayerView {
   const viewer = viewerId === null ? null : (findPlayer(state, viewerId) ?? null);
-  const everything = seesEverything(state, viewer);
+  const everything = seesEverything(state, viewer, options);
   const rules = state.config.rules;
   const ended = state.phase === 'ended';
 
-  const events = projectEvents(state, state.log, viewer ? viewer.id : null);
+  const events = projectEvents(state, state.log, viewer ? viewer.id : null, options);
 
   // чьи роли зритель вправе знать
   const known = new Set<PlayerId>();
@@ -190,6 +205,14 @@ export function viewFor(state: GameState, viewerId: PlayerId | null): PlayerView
     day: ended ? null : day,
     waitingForDecision: !ended && state.pending.length > 0,
     decision,
+    backstage: options?.seeAll
+      ? {
+          nightMoves: !ended && state.phase === 'night' && state.night ? JSON.parse(JSON.stringify(state.night.actions)) : {},
+          votes: !ended && state.phase === 'day' && state.day ? { ...state.day.votes } : {},
+          decision: head,
+          lovers: state.lovers.map((pair) => [pair[0], pair[1]]),
+        }
+      : null,
     events,
     result: state.result ? { ...state.result, winners: [...state.result.winners] } : null,
   };

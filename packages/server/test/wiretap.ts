@@ -1,17 +1,24 @@
 /**
  * «Прослушка»: проверяет ВСЕ сообщения, которые получил каждый клиент, на утечки чужих секретов.
  *
- * Проверки независимы друг от друга:
+ * Игрокам положено только своё. Проверки независимы друг от друга:
  *   1. соответствие движку — снимок и события в сообщении в точности равны `viewFor` и проекции
  *      событий для этого получателя;
  *   2. оракул — роль игрока видна, только если получатель вправе её знать (оракул написан
  *      отдельно от движка, в тестах движка);
  *   3. поиск по тексту — названия скрытых ролей не встречаются в сыром сообщении нигде;
  *   4. чат мафии приходит только живым чёрным;
- *   5. служебные секреты (чужие токены, хеши, состояние генератора) не уходят никому.
+ *   5. служебные секреты (чужие токены, хеши, состояние генератора) не уходят никому;
+ *   6. личные сцены «Кино» приходят только тому, на кого подействовали, называют роль, но не игрока,
+ *      и никогда не описывают нападение;
+ *   7. «закулисье» (чужие ходы и голоса) игроку не приходит никогда.
+ *
+ * Ведущему-наблюдателю разрешено всё, кроме служебных секретов: его снимок должен в точности
+ * равняться представлению движка с `seeAll`. Ведущий — тот, кто не играет в партии, начатой
+ * в режиме «ведущий-наблюдатель»; больше никому это не положено.
  */
 import { ROLE_IDS, currentDecision, projectEvent, projectEvents, viewFor } from '@mafia/engine';
-import type { PlayerId, ViewEvent } from '@mafia/engine';
+import type { GameEvent, GameState, PlayerId, ViewEvent } from '@mafia/engine';
 import type { GameSnapshot, Scene, ServerMessage } from '@mafia/protocol';
 import { allowedToKnow } from '../../engine/test/helpers';
 import { compositionOf } from '../src/game-view';
@@ -21,13 +28,42 @@ import type { Client, Table } from './harness';
 /** Строки, которых не должно быть ни в одном сообщении клиенту. */
 const FORBIDDEN_FRAGMENTS = ['"tokenHash"', '"salt"', '"rng"', '"visibility"', '"attempts"', '"password"'];
 
+/** Способности-нападения: их автор не раскрывается никому и никогда. */
+const ATTACKS = ['kill', 'potionKill'];
+/** Способности, которые не считаются приходом к игроку. */
+const NOT_VISITS = ['watch'];
+
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Какие личные сцены положены игроку по этим событиям. Написано независимо от сервера:
+ * сцена — это применённая к игроку способность (не нападение), роль её автора и признак спасения.
+ */
+export function expectedScenes(game: GameState, events: readonly GameEvent[], playerId: PlayerId): Scene[] {
+  const scenes: Scene[] = [];
+  for (const event of events) {
+    if (event.type !== 'abilityUsed') continue;
+    const ability = event.data.ability;
+    const actor = game.players.find((p) => p.id === event.actors[0]);
+    if (!actor || actor.id === playerId || !event.targets.includes(playerId)) continue;
+    if (ATTACKS.includes(ability) || NOT_VISITS.includes(ability)) continue;
+    const saved = game.log.some(
+      (e) => e.type === 'saved' && e.round === event.round && e.actors[0] === actor.id && e.targets[0] === playerId,
+    );
+    scenes.push({ id: event.id, round: event.round, ability, role: actor.role, saved });
+  }
+  return scenes;
+}
 
 export class Wiretap {
   /** Найденные утечки. Пусто — всё хорошо. */
   readonly problems: string[] = [];
   /** Сколько сообщений проверено. */
   checked = 0;
+  /** Сколько из них — снимки для ведущего-наблюдателя (ему разрешено видеть всё). */
+  narratorMessages = 0;
+  /** Сколько личных сцен «Кино» проверено. */
+  scenesChecked = 0;
   private readonly table: Table;
   private readonly cursor = new Map<Client, number>();
   private verifiedRev = -1;
@@ -59,7 +95,7 @@ export class Wiretap {
       this.problems.push(`${who}: ${problem}`);
     };
 
-    // 5. служебные секреты
+    // 5. служебные секреты — не положены никому, включая ведущего
     for (const fragment of FORBIDDEN_FRAGMENTS) {
       if (raw.includes(fragment)) report(`в сообщении есть служебное поле ${fragment}`);
     }
@@ -69,11 +105,15 @@ export class Wiretap {
     if (client.token && message.t !== 'welcome' && raw.includes(client.token)) report('токен повторно отправлен');
 
     const game = state.game;
-    const viewer: PlayerId | null = state.players.includes(client.memberId) ? client.memberId : null;
+    const playing = state.players.includes(client.memberId);
+    const viewer: PlayerId | null = playing ? client.memberId : null;
+    // ведущий-наблюдатель: не играет в партии, начатой в режиме «ведущий»
+    const narrator = game !== null && !playing && state.settings.hostMode === 'narrator';
+    const options = narrator ? { seeAll: true } : undefined;
 
     // 4. чат мафии
     const chatSeen = message.t === 'chat' || (message.t === 'welcome' && message.chat.length > 0);
-    if (chatSeen) {
+    if (chatSeen && !narrator) {
       const player = game?.players.find((p) => p.id === client.memberId);
       if (!player || !player.alive || player.team !== 'black') report('чат мафии получил не живой чёрный');
     }
@@ -88,66 +128,95 @@ export class Wiretap {
       return;
     }
     const display = state.settings.display;
+    const fresh = snapshot !== null && snapshot.rev === state.rev;
+    const oneStep = state.rev === this.verifiedRev + 1;
+    if (narrator && snapshot) this.narratorMessages++;
 
     if (snapshot) {
       if (snapshot.view.viewer !== viewer) report(`снимок предназначен другому зрителю: ${snapshot.view.viewer}`);
 
-      // 2. оракул: чьи роли получатель вправе знать
-      const allowed = allowedToKnow(game, viewer);
-      for (const p of snapshot.view.players) {
-        if ((p.role !== null || p.team !== null) && !allowed.has(p.id)) report(`видна роль игрока ${p.id}`);
+      if (!narrator) {
+        // 7. закулисье — только ведущему
+        if (snapshot.view.backstage !== null) report('игроку показано закулисье (чужие ходы и голоса)');
+
+        // 2. оракул: чьи роли получатель вправе знать
+        const allowed = allowedToKnow(game, viewer);
+        for (const p of snapshot.view.players) {
+          if ((p.role !== null || p.team !== null) && !allowed.has(p.id)) report(`видна роль игрока ${p.id}`);
+        }
+        const head = currentDecision(game);
+        if (snapshot.view.decision && head?.playerId !== viewer) report('решение показано не тому игроку');
       }
-      const head = currentDecision(game);
-      if (snapshot.view.decision && head?.playerId !== viewer) report('решение показано не тому игроку');
 
       const expectedComposition = display === 'stealth' ? null : compositionOf(game);
       if (!same(snapshot.composition, expectedComposition)) report('состав партии показан не по режиму');
 
       // 1. соответствие движку (для свежего снимка: состояние комнаты с тех пор не менялось)
-      if (snapshot.rev === state.rev) {
-        const { events: _events, ...expected } = viewFor(game, viewer);
+      if (fresh) {
+        const { events: _events, ...expected } = viewFor(game, viewer, options);
         if (!same(snapshot.view, expected)) report('снимок отличается от viewFor движка');
       }
     }
 
-    if (events.length > 0) {
-      const fresh = snapshot !== null && snapshot.rev === state.rev;
-      if (fresh) {
-        for (const event of events) {
-          const source = game.log[event.id - 1];
-          const expected = source ? projectEvent(game, source, viewer) : null;
-          if (!same(event, expected)) report(`событие №${event.id} (${event.type}) отличается от проекции движка`);
+    if (events.length > 0 && fresh) {
+      for (const event of events) {
+        const source = game.log[event.id - 1];
+        const expected = source ? projectEvent(game, source, viewer, options) : null;
+        if (!same(event, expected)) report(`событие №${event.id} (${event.type}) отличается от проекции движка`);
+      }
+      // полнота: ровно те события, что положены получателю на этом шаге
+      if (message.t === 'welcome') {
+        if (!same(events, projectEvents(game, game.log, viewer, options))) {
+          report('журнал при входе отличается от проекции движка');
         }
-        // полнота: ровно те события, что положены получателю на этом шаге
-        if (message.t === 'welcome') {
-          if (!same(events, projectEvents(game, game.log, viewer))) report('журнал при входе отличается от проекции движка');
-        } else if (state.rev === this.verifiedRev + 1) {
-          const expected = projectEvents(game, game.log.slice(this.logLength), viewer);
-          if (!same(events, expected)) report('события шага отличаются от проекции движка');
+      } else if (oneStep) {
+        const expected = projectEvents(game, game.log.slice(this.logLength), viewer, options);
+        if (!same(events, expected)) report('события шага отличаются от проекции движка');
+      }
+    }
+
+    // 6. личные сцены «Кино»
+    if (scenes.length > 0) {
+      if (display !== 'cinema') report('сцены вне режима «Кино»');
+      if (viewer === null) report('сцены пришли не игроку');
+    }
+    const mine = viewer === null ? [] : expectedScenes(game, game.log, viewer);
+    for (const scene of scenes) {
+      this.scenesChecked++;
+      const keys = Object.keys(scene).sort().join(',');
+      if (keys !== 'ability,id,role,round,saved') report(`в сцене лишние поля: ${keys}`);
+      if (ATTACKS.includes(scene.ability)) report(`сцена раскрывает нападавшего: ${scene.ability}`);
+      if (!mine.some((expected) => same(expected, scene))) report(`сцена №${scene.id} не положена получателю или искажена`);
+    }
+    if (display === 'cinema' && viewer !== null && fresh) {
+      if (message.t === 'welcome') {
+        if (!same(scenes, mine)) report('сцены при входе отличаются от положенных');
+      } else if (message.t === 'game' && oneStep) {
+        if (!same(scenes, expectedScenes(game, game.log.slice(this.logLength), viewer))) {
+          report('сцены шага отличаются от положенных');
         }
       }
     }
 
-    if (display !== 'cinema' && scenes.length > 0) report('сцены вне режима «Кино»');
-    for (const scene of scenes) {
-      const keys = Object.keys(scene).sort().join(',');
-      if (keys !== 'id,role,round,type') report(`в сцене лишние поля: ${keys}`);
-    }
-
     // 3. поиск по тексту: названия ролей, которых получатель знать не должен
-    const text = scrub(message, display !== 'stealth' || client.memberId === state.hostId);
-    const allowed = allowedToKnow(game, viewer);
-    const knownRoles = new Set(game.players.filter((p) => allowed.has(p.id)).map((p) => p.role));
-    for (const role of ROLE_IDS) {
-      const hidden = game.players.some((p) => p.role === role && !allowed.has(p.id));
-      if (hidden && !knownRoles.has(role) && text.includes(`"${role}"`)) report(`в сообщении встречается скрытая роль «${role}»`);
+    if (!narrator) {
+      const text = scrub(message, display !== 'stealth' || client.memberId === state.hostId);
+      const allowed = allowedToKnow(game, viewer);
+      const knownRoles = new Set(game.players.filter((p) => allowed.has(p.id)).map((p) => p.role));
+      for (const role of ROLE_IDS) {
+        const hidden = game.players.some((p) => p.role === role && !allowed.has(p.id));
+        if (hidden && !knownRoles.has(role) && text.includes(`"${role}"`)) {
+          report(`в сообщении встречается скрытая роль «${role}»`);
+        }
+      }
     }
   }
 }
 
 /**
  * Текст сообщения для поиска названий ролей — без частей, где роли названы законно:
- * какие роли включены и их квоты (настройки комнаты), а в открытых режимах — состав партии и сцены.
+ * какие роли включены и их квоты (настройки комнаты), а в открытых режимах — состав партии
+ * и личные сцены (их содержимое проверяется отдельно).
  * Ручной состав хоста (`preset`) остаётся под проверкой: в скрытном режиме его видит только хост.
  */
 function scrub(message: ServerMessage, presetIsPublic: boolean): string {

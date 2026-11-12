@@ -234,9 +234,12 @@ describe('День', () => {
     await (voters[3] as Client).ok({ t: 'vote', target });
     await table.byId(target).ok({ t: 'vote', target: null });
     await table.settle();
+    // казнь состоялась; перед ночью — вечер: клиенты показывают приговор
+    expect(table.host.game?.stage).toBe('evening');
+    expect((await table.game()).players.find((p) => p.id === target)?.alive).toBe(false);
+    await allReady(table);
     expect(table.host.game?.stage).toBe('night');
     expect(table.host.game?.view.round).toBe(2);
-    expect((await table.game()).players.find((p) => p.id === target)?.alive).toBe(false);
     // казнённый больше не ходит
     expect(await table.byId(target).request({ t: 'night', action: { kind: 'pass' } })).toMatchObject({
       ok: false,
@@ -250,7 +253,7 @@ describe('День', () => {
     const target = (await table.seat('civilian')).player.id;
     await table.host.ok({ t: 'vote', target: table.host.memberId === target ? null : target });
     await table.tick(46_000);
-    expect(table.host.game?.stage).toBe('night');
+    expect(table.host.game?.stage).toBe('evening');
     await table.closeAll();
   });
 
@@ -258,7 +261,7 @@ describe('День', () => {
     const table = await toDay();
     await table.host.ok({ t: 'advance', step: table.host.game?.step ?? -1 });
     await table.settle();
-    expect(table.host.game?.stage).toBe('night');
+    expect(table.host.game?.stage).toBe('evening');
     expect(table.host.events.some((e) => e.type === 'noExecution')).toBe(true);
     await table.closeAll();
   });
@@ -384,7 +387,7 @@ describe('Отложенные решения', () => {
 
     await judge.client.ok({ t: 'decision', decision: { kind: 'judgeVeto', veto: true } });
     await table.settle();
-    expect(table.host.game?.stage).toBe('night');
+    expect(table.host.game?.stage).toBe('evening');
     expect((await table.game()).players.every((p) => p.alive)).toBe(true);
     await table.closeAll();
   });
@@ -469,7 +472,7 @@ describe('Чат мафии', () => {
     for (const client of table.clients) {
       await client.ok({ t: 'vote', target: client === dead.client ? null : dead.player.id });
     }
-    await table.settle();
+    await allReady(table);
     expect(table.host.game?.stage).toBe('night');
 
     const mark = dead.client.inbox.length;
@@ -533,31 +536,327 @@ describe('Режимы показа событий', () => {
     await table.closeAll();
   });
 
-  it('«Кино»: после ночи все получают обезличенные сцены — роль и тип, без игроков', async () => {
+  it('«Кино»: игрок узнаёт роль того, кто на него подействовал, — и только он', async () => {
     const table = await tableWith(SET, { display: 'cinema' });
     await table.start();
-    expect(table.host.scenes).toEqual([]);
+    expect(table.clients.every((c) => c.scenes.length === 0)).toBe(true);
+    const mafia = await table.seat('mafia');
+    const victim = await table.seat('civilian', 0);
     await eventfulNight(table);
-    const expected = [
-      { round: 1, type: 'mafiaTargetChosen', role: null },
-      { round: 1, type: 'saved', role: 'doctor' },
-      { round: 1, type: 'checked', role: 'commissioner' },
-    ];
+
+    // мирного лечил Доктор — и это его спасло; мафию проверял Комиссар
+    expect(victim.client.scenes).toMatchObject([{ round: 1, ability: 'heal', role: 'doctor', saved: true }]);
+    expect(mafia.client.scenes).toMatchObject([{ round: 1, ability: 'check', role: 'commissioner', saved: false }]);
+    // остальным сцен не приходит: на них никто не действовал
     for (const client of table.clients) {
-      expect(client.scenes.map(({ round, type, role }) => ({ round, type, role }))).toEqual(expected);
-      expect(client.scenes.every((s) => Object.keys(s).sort().join() === 'id,role,round,type')).toBe(true);
+      if (client !== victim.client && client !== mafia.client) expect(client.scenes).toEqual([]);
       expect(client.game?.composition).toHaveLength(4);
     }
-    // сам результат проверки по-прежнему видит только Комиссар
-    const civilian = await table.seat('civilian', 1);
-    expect(civilian.client.events.some((e) => e.type === 'checked')).toBe(false);
-    expect((await table.seat('commissioner')).client.events.find((e) => e.type === 'checked')?.data).toEqual({ isMafia: true });
+    // в сцене есть роль, но нет игрока; результат проверки по-прежнему знает только Комиссар
+    expect(Object.keys(victim.client.scenes[0] ?? {}).sort()).toEqual(['ability', 'id', 'role', 'round', 'saved']);
+    expect(JSON.stringify(mafia.client.scenes)).not.toContain((await table.seat('commissioner')).player.id);
+    expect(mafia.client.events.some((e) => e.type === 'checked')).toBe(false);
+    // кто нападал, спасённый не узнаёт
+    expect(JSON.stringify(victim.client.scenes)).not.toContain('mafia');
+    expect(victim.client.game?.view.players.filter((p) => p.role !== null)).toHaveLength(1);
 
-    // переподключившийся получает сцены заново
-    await civilian.client.close();
-    const again = await Client.resume(table.code, civilian.client.token as string);
-    expect(again.scenes.map(({ round, type, role }) => ({ round, type, role }))).toEqual(expected);
+    // переподключившийся получает свои сцены заново
+    await victim.client.close();
+    const again = await Client.resume(table.code, victim.client.token as string);
+    expect(again.scenes).toEqual(victim.client.scenes);
     table.clients.push(again);
+    await table.closeAll();
+  });
+
+  it('«Кино»: убийца не раскрывается, наблюдение Патрульного сценой не становится', async () => {
+    const table = await tableWith(['mafia', 'mistress', 'hobo', 'bodyguard', 'maniac', 'patrol', 'civilian', 'civilian'], {
+      display: 'cinema',
+    });
+    await table.start();
+    const a = await table.seat('civilian', 0);
+    const b = await table.seat('civilian', 1);
+    await playNight(table, (p) => {
+      if (p.role === 'mistress') return [{ kind: 'ability', ability: 'block', targets: [a.player.id] }];
+      if (p.role === 'hobo') return [{ kind: 'ability', ability: 'stay', targets: [a.player.id] }];
+      if (p.role === 'patrol') return [{ kind: 'ability', ability: 'watch', targets: [a.player.id] }];
+      if (p.role === 'bodyguard') return [{ kind: 'ability', ability: 'guard', targets: [b.player.id] }];
+      if (p.role === 'maniac') return [{ kind: 'ability', ability: 'kill', targets: [b.player.id] }];
+      return undefined;
+    });
+    const brief = (client: Client) =>
+      client.scenes.map((s) => `${s.role}:${s.ability}:${s.saved}`).sort();
+    // у первого мирного ночевал Бомж и его заблокировала Любовница; Патрульный следил издалека — не сцена
+    expect(brief(a.client)).toEqual(['hobo:stay:false', 'mistress:block:false']);
+    // второго закрыл собой Телохранитель; кто напал — не сказано
+    expect(brief(b.client)).toEqual(['bodyguard:guard:true']);
+    expect((await table.game()).players.find((p) => p.role === 'bodyguard')?.alive).toBe(false);
+
+    for (const client of table.clients) {
+      // ни в одной сцене нет нападения
+      expect(client.scenes.some((s) => s.ability === 'kill' || s.ability === 'potionKill')).toBe(false);
+      // убийцу в событии «смерть» видит только сам убийца
+      const maniac = (await table.seat('maniac')).client;
+      for (const event of client.events) {
+        if (event.type === 'death' && event.actors.length > 0) expect(client).toBe(maniac);
+      }
+    }
+    await table.closeAll();
+  });
+});
+
+describe('Вечер: синхронизация после приговора', () => {
+  /** До вечера первого дня: казнён мирный. */
+  async function toEvening(settings: SettingsPatch = {}): Promise<Table> {
+    const table = await tableWith(CLASSIC, settings);
+    await table.start();
+    await playNight(table);
+    await allReady(table);
+    const target = (await table.seat('civilian')).player.id;
+    for (const client of table.clients) await client.ok({ t: 'vote', target: client.memberId === target ? null : target });
+    await table.settle();
+    expect(table.host.game?.stage).toBe('evening');
+    return table;
+  }
+
+  it('после казни ночь не начинается, пока клиенты не готовы', async () => {
+    const table = await toEvening();
+    const game = table.host.game;
+    expectDeadline(game, 15_000);
+    expect(game?.progress).toEqual({ done: 0, total: 5 });
+    // движок уже в ночи второго круга, но ходы сервер не принимает
+    expect(game?.view.phase).toBe('night');
+    expect(game?.view.round).toBe(2);
+    const mafia = await table.seat('mafia');
+    expect(await mafia.client.request({ t: 'night', action: { kind: 'mafiaVote', target: null } })).toMatchObject({
+      ok: false,
+      code: 'WRONG_STAGE',
+    });
+    expect(await mafia.client.request({ t: 'chat', text: 'рано' })).toMatchObject({ ok: false, code: 'CHAT_FORBIDDEN' });
+    // событие казни уже у всех: его и показывает сцена приговора
+    expect(table.host.events.some((e) => e.type === 'death' && e.data.cause === 'execution')).toBe(true);
+    await table.closeAll();
+  });
+
+  it('ночь начинается, когда «готов» прислали все, кто в сети', async () => {
+    const table = await toEvening();
+    const step = table.host.game?.step ?? -1;
+    for (const client of table.clients.slice(0, 4)) await client.ok({ t: 'ready', step });
+    await table.settle();
+    expect(table.host.game).toMatchObject({ stage: 'evening', progress: { done: 4, total: 5 } });
+    await (table.clients[4] as Client).ok({ t: 'ready', step });
+    await table.settle();
+    expect(table.host.game).toMatchObject({ stage: 'night', step: step + 1, deadline: null });
+    expect(table.host.game?.progress).toEqual({ done: 0, total: 4 });
+    await table.closeAll();
+  });
+
+  it('по таймауту 15 секунд ночь начинается сама', async () => {
+    const table = await toEvening();
+    await table.tick(14_000);
+    expect(table.host.game?.stage).toBe('evening');
+    await table.tick(1_500);
+    expect(table.host.game?.stage).toBe('night');
+    await table.closeAll();
+  });
+
+  it('хост может начать ночь, не дожидаясь остальных; отключившегося не ждут', async () => {
+    const byHost = await toEvening();
+    await byHost.host.ok({ t: 'advance', step: byHost.host.game?.step ?? -1 });
+    await byHost.settle();
+    expect(byHost.host.game?.stage).toBe('night');
+    await byHost.closeAll();
+
+    const table = await toEvening();
+    const step = table.host.game?.step ?? -1;
+    for (const client of table.clients.slice(0, 4)) await client.ok({ t: 'ready', step });
+    await (table.clients[4] as Client).close();
+    await table.settle();
+    expect(table.host.game?.stage).toBe('night');
+    await table.closeAll();
+  });
+
+  it('таймер ночи отсчитывается с начала ночи, а не с казни', async () => {
+    const table = await toEvening({ timers: { night: 40 } });
+    await allReady(table);
+    expect(table.host.game?.stage).toBe('night');
+    expectDeadline(table.host.game, 40_000);
+    await table.closeAll();
+  });
+
+  it('вечер наступает и когда никого не казнили', async () => {
+    const table = await tableWith(CLASSIC);
+    await table.start();
+    await playNight(table);
+    await allReady(table);
+    for (const client of table.clients) await client.ok({ t: 'vote', target: null });
+    await table.settle();
+    expect(table.host.game?.stage).toBe('evening');
+    expect(table.host.events.some((e) => e.type === 'noExecution')).toBe(true);
+    await table.closeAll();
+  });
+
+  it('предсмертный выстрел казнённого Охотника — до вечера', async () => {
+    const table = await tableWith(['hunter', 'mafia', 'civilian', 'civilian', 'civilian', 'civilian']);
+    await table.start();
+    await playNight(table);
+    await allReady(table);
+    const hunter = await table.seat('hunter');
+    for (const client of table.clients) {
+      await client.ok({ t: 'vote', target: client === hunter.client ? null : hunter.player.id });
+    }
+    await table.settle();
+    expect(table.host.game?.stage).toBe('decision');
+    const target = (await table.seat('civilian')).player.id;
+    await hunter.client.ok({ t: 'decision', decision: { kind: 'hunterShot', target } });
+    await table.settle();
+    expect(table.host.game?.stage).toBe('evening');
+    expect((await table.game()).players.filter((p) => !p.alive)).toHaveLength(2);
+    await table.closeAll();
+  });
+
+  it('если казнь заканчивает партию, вечера нет', async () => {
+    const table = await tableWith(CLASSIC);
+    await table.start();
+    await playNight(table);
+    await allReady(table);
+    const mafia = (await table.seat('mafia')).player.id;
+    for (const client of table.clients) await client.ok({ t: 'vote', target: client.memberId === mafia ? null : mafia });
+    await table.settle();
+    expect(table.host.game?.stage).toBe('ended');
+    expect((await table.state()).sync).toBeNull();
+    await table.closeAll();
+  });
+});
+
+describe('Ведущий-наблюдатель видит всё', () => {
+  const SET: RoleId[] = ['mafia', 'mafia', 'doctor', 'commissioner', 'hunter', 'civilian'];
+
+  /** Хост-ведущий и шесть игроков. */
+  async function narrated(settings: SettingsPatch = {}): Promise<Table> {
+    const table = await Table.create(SET.length, {
+      hostMode: 'narrator',
+      settings: { ...settings, composition: { preset: SET } },
+    });
+    await table.start();
+    return table;
+  }
+
+  it('с самого начала видит все роли и раздачу', async () => {
+    const table = await narrated();
+    const view = table.host.game?.view;
+    expect(view?.viewer).toBeNull();
+    expect(view?.you).toBeNull();
+    expect([...(view?.players.map((p) => p.role) ?? [])].sort()).toEqual([...SET].sort());
+    expect(table.host.events.filter((e) => e.type === 'roleAssigned')).toHaveLength(6);
+    expect(table.host.events.every((e) => !e.redacted)).toBe(true);
+    expect(view?.backstage).toEqual({ nightMoves: {}, votes: {}, decision: null, lovers: [] });
+    await table.closeAll();
+  });
+
+  it('видит ночные ходы в реальном времени, а после ночи — все результаты', async () => {
+    const table = await narrated();
+    const mafia = await table.seat('mafia');
+    const commissioner = await table.seat('commissioner');
+    const victim = (await table.seat('civilian')).player.id;
+
+    await mafia.client.ok({ t: 'night', action: { kind: 'mafiaVote', target: victim } });
+    await commissioner.client.ok({ t: 'night', action: { kind: 'ability', ability: 'check', targets: [mafia.player.id] } });
+    await table.settle();
+    expect(table.host.game?.view.backstage?.nightMoves).toEqual({
+      [mafia.player.id]: { mafiaVote: victim },
+      [commissioner.player.id]: { ability: { id: 'check', targets: [mafia.player.id] } },
+    });
+    // игроки чужих ходов не видят
+    for (const client of table.clients.slice(1)) expect(client.game?.view.backstage).toBeNull();
+
+    await playNight(table, (p) => {
+      if (p.id === mafia.player.id) return [{ kind: 'mafiaVote', target: victim }];
+      if (p.role === 'commissioner') return [{ kind: 'ability', ability: 'check', targets: [mafia.player.id] }];
+      return undefined;
+    });
+    const events = table.host.events;
+    expect(events.find((e) => e.type === 'checked')).toMatchObject({
+      actors: [commissioner.player.id],
+      targets: [mafia.player.id],
+      data: { isMafia: true },
+      redacted: false,
+    });
+    expect(events.find((e) => e.type === 'death')).toMatchObject({ targets: [victim], redacted: false });
+    expect(events.find((e) => e.type === 'death')?.actors).toHaveLength(1);
+    expect(events.some((e) => e.type === 'mafiaTargetChosen')).toBe(true);
+    expect(events.some((e) => e.type === 'abilityUsed')).toBe(true);
+    await table.closeAll();
+  });
+
+  it('видит голоса в тайном голосовании и знает, чьего решения ждёт игра', async () => {
+    const table = await narrated();
+    const hunter = await table.seat('hunter');
+    await playNight(table, (p) => (p.role === 'mafia' ? [{ kind: 'mafiaVote', target: hunter.player.id }] : undefined));
+    expect(table.host.game?.stage).toBe('decision');
+    expect(table.host.game?.view.backstage?.decision).toMatchObject({ kind: 'hunterShot', playerId: hunter.player.id });
+    // самому ведущему решать нечего
+    expect(table.host.game?.view.decision).toBeNull();
+    await hunter.client.ok({ t: 'decision', decision: { kind: 'hunterShot', target: null } });
+    await allReady(table);
+
+    const voter = (await table.seat('doctor')).client;
+    const target = (await table.seat('civilian')).player.id;
+    await voter.ok({ t: 'vote', target });
+    await table.settle();
+    expect(table.host.game?.view.backstage?.votes).toEqual({ [voter.memberId]: target });
+    expect(voter.game?.view.day?.ballots).toBeNull();
+    const other = (await table.seat('commissioner')).client;
+    expect(other.game?.view.backstage).toBeNull();
+    expect(JSON.stringify(other.game)).not.toContain(`"${voter.memberId}":"${target}"`);
+    await table.closeAll();
+  });
+
+  it('читает чат мафии, но писать в него и ходить не может', async () => {
+    const table = await narrated();
+    const mafia = await table.seat('mafia');
+    await mafia.client.ok({ t: 'chat', text: 'ведущий нас слышит' });
+    await table.host.until(() => table.host.chat.length === 1, 'чат у ведущего');
+    expect(table.host.chat[0]?.text).toBe('ведущий нас слышит');
+    expect(await table.host.request({ t: 'chat', text: 'привет' })).toMatchObject({ ok: false, code: 'CHAT_FORBIDDEN' });
+    expect(await table.host.request({ t: 'night', action: { kind: 'pass' } })).toMatchObject({ ok: false, code: 'NOT_PLAYING' });
+    expect(await table.host.request({ t: 'vote', target: null })).toMatchObject({ ok: false });
+
+    // при переподключении ведущий получает всё заново
+    const token = table.host.token as string;
+    await table.host.close();
+    const again = await Client.resume(table.code, token);
+    expect(again.chat.map((m) => m.text)).toEqual(['ведущий нас слышит']);
+    expect(again.events.filter((e) => e.type === 'roleAssigned')).toHaveLength(6);
+    expect(again.game?.view.backstage).not.toBeNull();
+    table.clients.push(again);
+    await table.closeAll();
+  });
+
+  it('права хоста можно передать игроку — видеть всё он от этого не начинает', async () => {
+    const table = await narrated();
+    const player = table.clients[1] as Client;
+    await table.host.ok({ t: 'transferHost', memberId: player.memberId });
+    await playNight(table);
+    expect(player.room?.hostId).toBe(player.memberId);
+    expect(player.game?.view.backstage).toBeNull();
+    expect(player.game?.view.players.filter((p) => p.role !== null).length).toBeLessThan(6);
+    // прежний ведущий остаётся наблюдателем
+    expect(table.host.game?.view.backstage).not.toBeNull();
+    expect(table.host.game?.view.players.every((p) => p.role !== null)).toBe(true);
+    await table.closeAll();
+  });
+
+  it('когда хост играет сам, «закулисья» нет ни у кого', async () => {
+    const table = await tableWith(CLASSIC);
+    await table.start();
+    const mafia = await table.seat('mafia');
+    const victim = (await table.seat('civilian')).player.id;
+    await playNight(table, (p) => (p.role === 'mafia' ? [{ kind: 'mafiaVote', target: victim }] : undefined));
+    for (const client of table.clients) {
+      expect(client.game?.view.backstage).toBeNull();
+      // выбор жертвы мафией видит только сама мафия
+      expect(client.events.some((e) => e.type === 'mafiaTargetChosen')).toBe(client === mafia.client);
+    }
     await table.closeAll();
   });
 });

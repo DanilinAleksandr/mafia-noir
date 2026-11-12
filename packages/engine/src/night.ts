@@ -218,6 +218,12 @@ export function resolveNight(state: GameState): StepResult {
   const markUse = (act: Act): void => {
     act.actor.uses[act.def.id] = (act.actor.uses[act.def.id] ?? 0) + 1;
     act.actor.last[act.def.id] = { round: s.round, targets: [...act.targets] };
+    emit(ctx, 'abilityUsed', {
+      actors: [act.actor.id],
+      targets: [...act.targets],
+      data: { ability: act.def.id },
+      visibility: toPlayers(act.actor.id),
+    });
   };
   const ofStep = (list: Act[], step: AbilityDef['step']): Act[] => list.filter((a) => a.def.step === step);
 

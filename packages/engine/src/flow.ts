@@ -79,12 +79,13 @@ export function applyDeaths(ctx: Ctx, kills: Kill[]): void {
     p.alive = false;
     p.death = { round: s.round, phase: s.phase, cause: kill.cause };
 
+    // Убийца не раскрывается никому: кто именно убил, видит только он сам (у мафии — своя команда).
+    // Это относится и к выстрелу Охотника, и к взрыву Подрывника.
     let visibility: Visibility;
     if (kill.cause === 'mafiaKill') visibility = toTeam('black');
-    else if (kill.killer && (kill.cause === 'maniacKill' || kill.cause === 'witchPoison')) {
-      visibility = toPlayers(kill.killer);
-    } else if (rules.revealDeathCause) visibility = ALL;
-    else visibility = toPlayers(...(kill.killer ? [kill.killer] : []));
+    else if (kill.killer) visibility = toPlayers(kill.killer);
+    else if (rules.revealDeathCause) visibility = ALL;
+    else visibility = toPlayers();
 
     emit(ctx, 'death', {
       actors: kill.killer ? [kill.killer] : [],

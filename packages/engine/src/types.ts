@@ -394,6 +394,11 @@ export interface EventDataMap {
   nightStarted: NoData;
   dayStarted: NoData;
   // ночь
+  /**
+   * Способность применена (не заблокирована). actors: [кто], targets: [на кого].
+   * Видит только применивший. Убийства мафии сюда не попадают: это не способность, а решение команды.
+   */
+  abilityUsed: { ability: AbilityId };
   /** actors: [Купидон], targets: [a, b]. Влюблённые видят скрытный вид (без Купидона). */
   loversLinked: NoData;
   /** actors: [Любовница], targets: [цель]. Цель видит скрытный вид. */
@@ -564,6 +569,29 @@ export interface PlayerView {
   waitingForDecision: boolean;
   /** Решение, которого ждут от вас. */
   decision: ViewDecision | null;
+  /**
+   * «Закулисье» — только в представлении с `seeAll` (ведущий-наблюдатель): чужие ходы и голоса
+   * в реальном времени. У игроков всегда null.
+   */
+  backstage: {
+    /** Ночные ходы всех игроков на текущий момент (ночью). */
+    nightMoves: Record<PlayerId, NightEntry>;
+    /** Голоса всех игроков на текущий момент (днём). */
+    votes: Record<PlayerId, PlayerId | null>;
+    /** От кого и какого решения ждёт игра. */
+    decision: (ViewDecision & { playerId: PlayerId }) | null;
+    /** Пары, связанные Купидоном. */
+    lovers: [PlayerId, PlayerId][];
+  } | null;
   events: ViewEvent[];
   result: GameResult | null;
+}
+
+/** Параметры представления. */
+export interface ViewOptions {
+  /**
+   * Видеть всё: все роли, журнал целиком и «закулисье». Для ведущего-наблюдателя,
+   * который сам не играет. Игрокам этот режим давать нельзя.
+   */
+  seeAll?: boolean;
 }

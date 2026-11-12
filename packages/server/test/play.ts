@@ -2,6 +2,7 @@
  * Партия ботов поверх тестовых клиентов. Каждый бот действует только по своему снимку —
  * ровно как настоящий клиент.
  */
+import { nightMoveDone } from '@mafia/engine';
 import type { NightAction, PlayerState } from '@mafia/engine';
 import type { RoomState } from '../src/state';
 import { type BotMemory, botMove, newBotMemory, seededRandom } from '../tools/bot';
@@ -87,6 +88,9 @@ export async function playNight(
   const game = await table.game();
   for (const player of game.players) {
     if (!player.alive || options.skip?.includes(player.id)) continue;
+    // кто уже сходил до вызова, повторно не ходит: иначе, окажись он последним по местам,
+    // ночь разрешилась бы раньше его повторного хода
+    if (nightMoveDone(game, player.id)) continue;
     const client = table.byId(player.id);
     const planned = plan(player);
     const actions: NightAction[] = planned ? [...planned] : [];

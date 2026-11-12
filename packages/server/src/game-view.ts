@@ -1,17 +1,17 @@
 /**
  * Чистые функции, которые собирают из состояния комнаты то, что уходит клиентам.
  */
-import { ROLE_IDS } from '@mafia/engine';
-import type { EventType, GameEvent, GameState, RoleId } from '@mafia/engine';
+import { ROLE_IDS, findAbility } from '@mafia/engine';
+import type { GameEvent, GameState, PlayerId, RoleId } from '@mafia/engine';
 import type { GameStage, RoleCount, Scene } from '@mafia/protocol';
 import type { RoomState } from './state';
 
 /** Стадия партии с точки зрения сервера. */
-export function stageOf(room: Pick<RoomState, 'game' | 'morning'>): GameStage {
+export function stageOf(room: Pick<RoomState, 'game' | 'sync'>): GameStage {
   const game = room.game as GameState;
   if (game.phase === 'ended') return 'ended';
   if (game.pending.length > 0) return 'decision';
-  if (room.morning) return 'morning';
+  if (room.sync) return room.sync.kind;
   return game.phase;
 }
 
@@ -22,31 +22,34 @@ export function compositionOf(game: GameState): RoleCount[] {
   return ROLE_IDS.filter((role) => counts.has(role)).map((role) => ({ role, count: counts.get(role) as number }));
 }
 
-/** События ночи, которые в режиме «Кино» показываются всем как обезличенные сцены. */
-const SCENE_TYPES: ReadonlySet<EventType> = new Set<EventType>([
-  'loversLinked',
-  'blocked',
-  'blessed',
-  'mafiaTargetChosen',
-  'saved',
-  'covered',
-  'silenced',
-  'checked',
-  'roleLearned',
-  'visitorsSeen',
-  'teamsCompared',
-]);
-
 /**
- * Сцены для режима «Кино»: тип события и роль действовавшего.
- * Игроков, целей и результатов в сцене нет — по ней нельзя узнать, кто какую роль играет.
+ * Личные сцены игрока для режима «Кино»: кто из ролей ночью подействовал на него.
+ *
+ * Сцена строится по событию `abilityUsed`, если игрок — цель способности, а не её автор.
+ * В сцену попадает роль применившего, но не его id. Нападения (Маньяк, яд Ведьмы) и убийство
+ * мафии сценами не становятся никогда: убийца не раскрывается. Наблюдение Патрульного — тоже:
+ * он следит со стороны и к игроку не приходит.
+ *
+ * @param events события, по которым строить сцены (шаг или весь журнал)
  */
-export function scenesOf(game: GameState, events: readonly GameEvent[]): Scene[] {
+export function personalScenes(game: GameState, events: readonly GameEvent[], playerId: PlayerId): Scene[] {
   const scenes: Scene[] = [];
   for (const event of events) {
-    if (event.phase !== 'night' || !SCENE_TYPES.has(event.type)) continue;
-    const actor = event.type === 'mafiaTargetChosen' ? undefined : game.players.find((p) => p.id === event.actors[0]);
-    scenes.push({ id: event.id, round: event.round, type: event.type, role: actor ? actor.role : null });
+    if (event.type !== 'abilityUsed') continue;
+    const actorId = event.actors[0];
+    if (actorId === undefined || actorId === playerId || !event.targets.includes(playerId)) continue;
+    const actor = game.players.find((p) => p.id === actorId);
+    const ability = actor ? findAbility(actor.role, event.data.ability) : undefined;
+    if (!actor || !ability || ability.step === 'attack' || !ability.visit) continue;
+    const saved = game.log.some(
+      (e) =>
+        e.type === 'saved' &&
+        e.round === event.round &&
+        e.phase === 'night' &&
+        e.actors[0] === actorId &&
+        e.targets[0] === playerId,
+    );
+    scenes.push({ id: event.id, round: event.round, ability: event.data.ability, role: actor.role, saved });
   }
   return scenes;
 }

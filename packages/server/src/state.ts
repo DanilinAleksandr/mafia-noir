@@ -15,8 +15,8 @@ export const LIMITS_SERVER = {
   idleMs: 6 * HOUR,
   /** Хост, отключившийся дольше этого времени, теряет права. */
   hostGraceMs: 2 * MINUTE,
-  /** Сколько ждать «готов» от клиентов утром. */
-  morningMs: 15 * SECOND,
+  /** Сколько ждать «готов» от клиентов утром и вечером. */
+  syncMs: 15 * SECOND,
   /** Неверных паролей с одного адреса за окно — до блокировки. */
   attemptsPerIp: 5,
   /** Неверных паролей на всю комнату за окно — до блокировки новых входов. */
@@ -46,8 +46,11 @@ export interface Attempts {
   lockedUntil: number;
 }
 
+/** Версия формата состояния комнаты. Комнаты другого формата считаются несуществующими. */
+export const ROOM_STATE_VERSION = 2;
+
 export interface RoomState {
-  v: 1;
+  v: typeof ROOM_STATE_VERSION;
   code: string;
   createdAt: number;
   /** Последняя активность: по ней считается простой. */
@@ -68,8 +71,11 @@ export interface RoomState {
   rev: number;
   /** Номер шага партии: растёт при каждом разрешении (ночь, голосование, решение, начало дня). */
   step: number;
-  /** Утренняя синхронизация: кто уже готов и когда день начнётся сам. null — не утро. */
-  morning: { ready: MemberId[]; deadline: number } | null;
+  /**
+   * Синхронизация перед следующей фазой: утром (итоги ночи) и вечером (приговор).
+   * Кто уже готов и когда игра пойдёт дальше сама. null — синхронизации нет.
+   */
+  sync: { kind: 'morning' | 'evening'; ready: MemberId[]; deadline: number } | null;
   /** Когда текущая стадия закончится по таймеру; null — таймера нет. */
   stageDeadline: number | null;
   chat: ChatMessage[];

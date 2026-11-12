@@ -398,16 +398,21 @@ describe('Хост', () => {
     await table.closeAll();
   });
 
-  it('режим ведущего: хост не получает роль и видит только общую картину', async () => {
+  it('режим ведущего: хост не получает роль, не ходит, но видит все роли', async () => {
     const table = await Table.create(4, { hostMode: 'narrator' });
     expect(table.host.room?.members.map((m) => m.playing)).toEqual([false, true, true, true, true]);
     const game = await table.start();
     expect(game.players.map((p) => p.id)).toEqual(['m2', 'm3', 'm4', 'm5']);
     expect(table.host.game?.view.viewer).toBeNull();
     expect(table.host.game?.view.you).toBeNull();
-    expect(table.host.game?.view.players.every((p) => p.role === null)).toBe(true);
-    expect(table.host.events.some((e) => e.type === 'roleAssigned')).toBe(false);
+    expect(table.host.game?.view.players.map((p) => p.role)).toEqual(game.players.map((p) => p.role));
+    expect(table.host.events.filter((e) => e.type === 'roleAssigned')).toHaveLength(4);
+    expect(table.host.game?.view.backstage).not.toBeNull();
     expect(await table.host.request({ t: 'night', action: { kind: 'pass' } })).toMatchObject({ ok: false, code: 'NOT_PLAYING' });
+    // игроки по-прежнему видят только себя
+    const guest = table.clients[1] as Client;
+    expect(guest.game?.view.backstage).toBeNull();
+    expect(guest.events.filter((e) => e.type === 'roleAssigned')).toHaveLength(1);
     await table.closeAll();
   });
 

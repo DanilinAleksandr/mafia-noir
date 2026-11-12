@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { viewFor } from '@mafia/engine';
 import type { GameEvent, RoleId } from '@mafia/engine';
 import type { HostMode, ServerMessage, SettingsPatch } from '@mafia/protocol';
 import { seededRandom } from '../tools/bot';
@@ -62,6 +63,12 @@ describe('Полная партия ботов с прослушкой всех 
 
     expect(tap.problems).toEqual([]);
     expect(tap.checked).toBeGreaterThan(scenario.players * 10);
+    // ведущему разрешено видеть всё — и это тоже проверено; игрокам такие снимки не уходили
+    if (scenario.hostMode === 'narrator') expect(tap.narratorMessages).toBeGreaterThan(20);
+    else expect(tap.narratorMessages).toBe(0);
+    // в «Кино» игроки получали личные сцены, и каждая проверена
+    if (scenario.settings?.display === 'cinema') expect(tap.scenesChecked).toBeGreaterThan(3);
+    else expect(tap.scenesChecked).toBe(0);
     // боты доиграли сами: ни разу не пришлось нажимать «дальше» за хоста
     expect(result.forced).toBe(0);
     expect(result.state.stage).toBe('finished');
@@ -271,7 +278,7 @@ describe('Прослушка действительно ловит утечки'
     expect(problemsIn(ctx, ctx.spy, withComposition).some((p) => p.includes('состав партии показан не по режиму'))).toBe(true);
 
     const withScenes = copy(ctx.last);
-    withScenes.scenes = [{ id: 9, round: 1, type: 'checked', role: 'commissioner' }];
+    withScenes.scenes = [{ id: 9, round: 1, ability: 'check', role: 'commissioner', saved: false }];
     expect(problemsIn(ctx, ctx.spy, withScenes).some((p) => p.includes('сцены вне режима «Кино»'))).toBe(true);
 
     // настройки с ручным составом, показанные не хосту
@@ -281,11 +288,58 @@ describe('Прослушка действительно ловит утечки'
     await ctx.table.closeAll();
   });
 
-  it('сцена с лишними полями в режиме «Кино»', async () => {
+  it('в режиме «Кино»: чужая сцена, сцена с игроком и сцена с нападавшим', async () => {
     const ctx = await setup({ display: 'cinema' });
-    const withTarget = copy(ctx.last);
-    withTarget.scenes = [{ id: 9, round: 1, type: 'checked', role: 'commissioner', target: ctx.mafia.player.id } as never];
-    expect(problemsIn(ctx, ctx.spy, withTarget).some((p) => p.includes('в сцене лишние поля'))).toBe(true);
+    // настоящая сцена: мафию проверял Комиссар — её получил только сам мафиози
+    const real = ctx.mafia.client.scenes[0];
+    if (!real) throw new Error('у мафии нет сцены');
+    expect(real).toMatchObject({ ability: 'check', role: 'commissioner' });
+    const own = [...ctx.mafia.client.inbox].reverse().find((m) => m.t === 'game' && m.scenes.length > 0) as ServerMessage;
+    expect(problemsIn(ctx, ctx.mafia.client, own)).toEqual([]);
+
+    // та же сцена, пришедшая постороннему
+    const foreign = copy(ctx.last);
+    foreign.scenes = [real];
+    expect(problemsIn(ctx, ctx.spy, foreign).some((p) => p.includes('не положена получателю'))).toBe(true);
+
+    // сцена, в которой назван игрок
+    const withPlayer = copy(own) as Extract<ServerMessage, { t: 'game' }>;
+    withPlayer.scenes = [{ ...real, actor: 'm1' } as never];
+    expect(problemsIn(ctx, ctx.mafia.client, withPlayer).some((p) => p.includes('в сцене лишние поля'))).toBe(true);
+
+    // сцена, раскрывающая нападавшего
+    const withKiller = copy(ctx.last);
+    withKiller.scenes = [{ id: real.id, round: 1, ability: 'kill', role: 'maniac', saved: false }];
+    expect(problemsIn(ctx, ctx.spy, withKiller).some((p) => p.includes('раскрывает нападавшего'))).toBe(true);
+    await ctx.table.closeAll();
+  });
+
+  it('«закулисье» и снимок ведущего, пришедшие игроку', async () => {
+    const ctx = await setup();
+    const withBackstage = copy(ctx.last);
+    withBackstage.game.view.backstage = { nightMoves: {}, votes: {}, decision: null, lovers: [] };
+    const problems = problemsIn(ctx, ctx.spy, withBackstage);
+    expect(problems.some((p) => p.includes('игроку показано закулисье'))).toBe(true);
+    expect(problems.some((p) => p.includes('отличается от viewFor'))).toBe(true);
+
+    // снимок «видит всё», собранный движком для ведущего, но отправленный игроку
+    const omniscient = copy(ctx.last);
+    const { events: _events, ...view } = viewFor(ctx.game, null, { seeAll: true });
+    omniscient.game.view = view;
+    const leaked = problemsIn(ctx, ctx.spy, omniscient);
+    expect(leaked.some((p) => p.includes('предназначен другому зрителю'))).toBe(true);
+    expect(leaked.some((p) => p.includes('видна роль игрока'))).toBe(true);
+    expect(leaked.some((p) => p.includes('игроку показано закулисье'))).toBe(true);
+    await ctx.table.closeAll();
+  });
+
+  it('в партии без ведущего «видеть всё» не положено никому, даже неиграющему', async () => {
+    // обычная партия: хост играет. Подделываем сообщение так, будто получатель — наблюдатель
+    const ctx = await setup();
+    const fake = copy(ctx.last);
+    const { events: _events, ...view } = viewFor(ctx.game, ctx.spy.memberId, { seeAll: true });
+    fake.game.view = view;
+    expect(problemsIn(ctx, ctx.spy, fake).length).toBeGreaterThan(0);
     await ctx.table.closeAll();
   });
 });

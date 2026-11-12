@@ -189,6 +189,7 @@ const STAGE_NAMES: Record<string, string> = {
   decision: 'Решение',
   morning: 'Утро',
   day: 'День',
+  evening: 'Вечер',
   ended: 'Конец',
 };
 
@@ -204,7 +205,7 @@ function describeMove(move: ClientMessage, name: (id: string | null) => string):
       if (move.decision.kind === 'judgeVeto') return `решение Судьи: ${move.decision.veto ? 'отменить' : 'не отменять'}`;
       return `решение ${move.decision.kind}: ${name(move.decision.target)}`;
     case 'ready':
-      return 'готов к началу дня';
+      return 'готов';
     case 'chat':
       return `чат мафии: «${move.text}»`;
     default:

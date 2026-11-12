@@ -55,8 +55,8 @@ const CHAT_LINES = ['кого берём?', 'предлагаю того, кто
 export function botMove(game: GameSnapshot, memory: BotMemory, random: Random): ClientMessage | null {
   const view = game.view;
 
-  // утро: клиент «досмотрел» итоги ночи
-  if (game.stage === 'morning') {
+  // утро и вечер: клиент «досмотрел» итоги ночи или приговор
+  if (game.stage === 'morning' || game.stage === 'evening') {
     if (memory.readyStep === game.step) return null;
     memory.readyStep = game.step;
     return { t: 'ready', step: game.step };
