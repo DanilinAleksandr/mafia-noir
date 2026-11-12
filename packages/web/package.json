@@ -1,0 +1,7 @@
+{
+  "name": "@mafia/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Каркас: Vite + React + TypeScript + Tailwind + Framer Motion, PWA (этап 3)",
+  "type": "module"
+}

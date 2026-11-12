@@ -1,0 +1,22 @@
+{
+  "name": "mafia-online",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Мафия Online — веб-игра для компании друзей",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace @mafia/engine",
+    "test:watch": "npm run test:watch --workspace @mafia/engine",
+    "typecheck": "npm run typecheck --workspace @mafia/engine"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
