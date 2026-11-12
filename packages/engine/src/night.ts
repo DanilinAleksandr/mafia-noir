@@ -161,6 +161,24 @@ export function pendingNightActors(state: GameState): PlayerId[] {
     .map((p) => p.id);
 }
 
+/**
+ * Сделал ли игрок ночной ход — включая «пустой» ход тех, кому делать нечего
+ * (для них ходом считается `{ kind: 'pass' }`).
+ * Нужен серверу, чтобы по скорости ответа нельзя было вычислить роль: ждут всех живых.
+ */
+export function nightMoveDone(state: GameState, playerId: PlayerId): boolean {
+  if (!nightOpen(state)) return false;
+  const options = nightOptions(state, playerId);
+  if (!options) return false;
+  const entry = (state.night as NonNullable<GameState['night']>).actions[playerId];
+  return entry !== undefined && entryComplete(options, entry);
+}
+
+/** Сделали ли ход все живые игроки, включая «пустые» ходы. */
+export function allNightMovesDone(state: GameState): boolean {
+  return nightOpen(state) && alivePlayers(state).every((p) => nightMoveDone(state, p.id));
+}
+
 /** Все ли, кому есть что делать ночью, ответили (способность или отказ; голос мафии). */
 export function allNightActionsIn(state: GameState): boolean {
   return nightOpen(state) && pendingNightActors(state).length === 0;

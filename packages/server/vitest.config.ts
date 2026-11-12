@@ -1,0 +1,11 @@
+import { cloudflareTest } from '@cloudflare/vitest-plugin';
+import { defineConfig } from 'vitest/config';
+
+// Тесты выполняются внутри workerd (Miniflare) — в той же среде, что и сервер. Сеть не нужна.
+export default defineConfig({
+  plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
+  test: {
+    include: ['test/**/*.test.ts'],
+    testTimeout: 30_000,
+  },
+});

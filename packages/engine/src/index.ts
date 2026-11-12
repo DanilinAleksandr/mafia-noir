@@ -10,14 +10,29 @@ export {
   validateComposition,
   defaultBlackCount,
   defaultNeutralMax,
+  effectiveCiviliansShare,
   CATEGORY_LABELS,
   type CompositionIssue,
   type CompositionIssueCode,
   type CompositionResult,
 } from './composition';
-export { DEFAULT_RULES, MIN_PLAYERS, resolveConfig } from './config';
+export {
+  CIVILIANS_SHARE_FROM_PLAYERS,
+  DEFAULT_CIVILIANS_SHARE,
+  DEFAULT_RULES,
+  MIN_PLAYERS,
+  resolveConfig,
+} from './config';
 
-export { nightOptions, submitNightAction, allNightActionsIn, pendingNightActors, resolveNight } from './night';
+export {
+  nightOptions,
+  submitNightAction,
+  allNightActionsIn,
+  allNightMovesDone,
+  nightMoveDone,
+  pendingNightActors,
+  resolveNight,
+} from './night';
 export { castVote, allVotesIn, resolveVote } from './day';
 export { currentDecision, submitDecision, resolvePendingDefault } from './flow';
 export { checkWin } from './win';

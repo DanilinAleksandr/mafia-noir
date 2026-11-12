@@ -1,0 +1,15 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mafia-online",
+  "main": "src/index.ts",
+  // не новее версии workerd, которая стоит локально
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+  },
+  // SQLite-хранилище: единственный вид Durable Objects на бесплатном плане
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  // локальная разработка: никаких обращений к Cloudflare
+  "send_metrics": false,
+  "dev": { "port": 8787, "ip": "127.0.0.1" }
+}

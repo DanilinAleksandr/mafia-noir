@@ -8,15 +8,19 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "npm run test --workspace @mafia/engine",
-    "test:watch": "npm run test:watch --workspace @mafia/engine",
-    "typecheck": "npm run typecheck --workspace @mafia/engine"
+    "test": "npm run test --workspaces --if-present",
+    "test:engine": "npm run test --workspace @mafia/engine",
+    "test:protocol": "npm run test --workspace @mafia/protocol",
+    "test:server": "npm run test --workspace @mafia/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev": "npm run dev --workspace @mafia/server",
+    "bots": "npm run bots --workspace @mafia/server --"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   }
 }

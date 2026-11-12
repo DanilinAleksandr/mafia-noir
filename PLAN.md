@@ -1,113 +1,83 @@
 # PLAN.md — «Мафия Online»
 
-Живой план проекта. Обновляется в конце каждого этапа. Подробности по движку — в `packages/engine/README.md`.
+Живой план проекта. Обновляется в конце каждого этапа. Память проекта и принятые решения — в `CLAUDE.md`; подробности — в README пакетов.
 
 ## Этапы
 
 | № | Этап | Статус |
 |---|------|--------|
 | 1 | `packages/engine`: игровой движок + тесты | **готов** |
-| 2 | `packages/server`: Cloudflare Worker + Durable Objects, комнаты, пароли, переподключение | запланирован |
-| 3 | `packages/web`: клиент (лобби, настройка состава, игровой экран), PWA | запланирован |
+| 2 | `packages/protocol` + `packages/server`: протокол, комнаты, Durable Object, тесты, боты | **готов** (без деплоя) |
+| 3 | `packages/web`: клиент (лобби, настройка состава, игровой экран), PWA | следующий |
 | 4 | Кинематографичный слой: сцены ночи и утра, круглый стол, анимации карточек | запланирован |
 | 5 | Иллюстрации ролей, звук, полировка | запланирован |
+| — | Деплой на Cloudflare | отдельно, по команде |
+
+## Архитектура
+
+```
+браузер (web) ──WebSocket──▶ Worker ──▶ Durable Object «Комната» ──▶ engine (чистые функции)
+        ▲                                        │
+        └──── room / game / chat (только своё) ◀─┘
+```
+
+- `@mafia/engine` — правила игры: состояние, ночь, день, победа, `viewFor`, события.
+- `@mafia/protocol` — общий язык клиента и сервера: сообщения, проверка входящих, ошибки, настройки.
+- `@mafia/server` — комнаты, вход, таймеры, рассылка; игровая логика только через движок.
+- `@mafia/web` — показывает снимки и отправляет намерения игрока.
 
 ## Этап 1: движок (готов)
 
-Итог: 25 ролей, ночь и день, отложенные решения (Охотник, Подрывник, Судья), условия победы, генератор состава по квотам, `viewFor` без утечек, события с двухуровневой видимостью. 210 тестов в 10 файлах, `npm test` зелёный, `npm run typecheck` чистый. Принятые решения по спорным правилам и открытые вопросы — в `CLAUDE.md`.
+25 ролей, ночь и день, отложенные решения (Охотник, Подрывник, Судья), условия победы, генератор состава по квотам, `viewFor` без утечек, события с двухуровневой видимостью. 223 теста.
 
-### Структура папок
-
-```
-package.json            npm workspaces (packages/*), общие devDependencies
-tsconfig.base.json
-packages/
-  engine/
-    src/
-      types.ts          все публичные типы (состояние, конфиг, события, представление)
-      rng.ts            детерминированный ГСЧ (mulberry32 + хеш seed)
-      roles.ts          каталог ролей — данные (команда, категория, способности, пассивки)
-      config.ts         правила по умолчанию, нормализация конфига
-      composition.ts    generateComposition, validateComposition
-      state.ts          внутреннее: клонирование, контекст шага, emit, ошибки
-      flow.ts           смерти и цепочки, отложенные решения, смена фаз, конец игры
-      night.ts          nightOptions, submitNightAction, allNightActionsIn, resolveNight
-      day.ts            castVote, allVotesIn, resolveVote
-      win.ts            checkWin
-      view.ts           viewFor, projectEvent
-      game.ts           createGame
-      index.ts          публичный API
-    test/               vitest
-  server/               каркас (README)
-  web/                  каркас (README)
-```
-
-### Основные типы
-
-- `GameState` — обычный JSON (без классов, Map, Infinity): `config`, `rng`, `phase` (`night | day | ended`), `round`, `players[]`, `night`, `day`, `pending[]` (отложенные решения), `lovers`, `log` (все события), `result`.
-- `PlayerState` — `id`, `name`, `seat`, `role`, `team`, `alive`, `death`, счётчики способностей.
-- `GameConfig` = `rules` (правила) + `composition` (роли, лимиты копий, квоты).
-- `GameEvent` — см. ниже.
-- `PlayerView` — то, что уходит клиенту.
-
-### API движка
-
-Все функции чистые: входное состояние не меняется, возвращается новое.
+API (подробно — `packages/engine/README.md`):
 
 ```
-createGame(config, players, seed)            → { state, events }
-generateComposition(playerCount, config, seed) → { ok: true, roles, counts, warnings } | { ok: false, errors }
-validateComposition(roles, rules)            → { errors, warnings }
-
-nightOptions(state, playerId)                → доступные способности и цели
-submitNightAction(state, playerId, action)   → { state, events }
-allNightActionsIn(state)                     → boolean
-resolveNight(state)                          → { state, events }
-
-castVote(state, voterId, targetId | null)    → { state, events }
-allVotesIn(state)                            → boolean
-resolveVote(state)                           → { state, events }
-
-currentDecision(state)                       → отложенное решение (Охотник, Подрывник, Судья)
-submitDecision(state, playerId, decision)    → { state, events }
-resolvePendingDefault(state)                 → { state, events }   (таймаут)
-
-checkWin(state)                              → GameResult | null
-viewFor(state, playerId | null)              → PlayerView
+createGame(config, players, seed)              → { state, events }
+generateComposition(playerCount, config, seed) → { ok, roles, counts, warnings } | { ok: false, errors }
+nightOptions / submitNightAction / allNightActionsIn / nightMoveDone / allNightMovesDone / resolveNight
+castVote / allVotesIn / resolveVote
+currentDecision / submitDecision / resolvePendingDefault
+checkWin(state)                                → GameResult | null
+viewFor(state, playerId | null)                → PlayerView
+projectEvents(state, events, playerId | null)  → ViewEvent[]
 ```
 
-Ошибки ввода — исключение `EngineError` с полем `code`.
+Формат события: `id`, `round`, `phase`, `type`, `actors`, `targets`, `data`, `visibility` (кто видит целиком), `stealth` (скрытный вид для остальных: кому, показывать ли участников, какие поля данных).
 
-### Формат событий
+## Этап 2: сервер (готов)
 
-```ts
-interface GameEvent {
-  id: number;            // порядковый номер в игре
-  round: number;
-  phase: 'setup' | 'night' | 'day' | 'ended';
-  type: EventType;       // death, saved, blocked, checked, ...
-  actors: PlayerId[];    // кто сделал
-  targets: PlayerId[];   // с кем сделали
-  data: {...};           // зависит от типа
-  visibility: { all, teams, players };   // кто видит событие целиком
-  stealth: null | {      // «скрытный» вид для тех, кто не видит целиком
-    visibility: { all, teams, players };
-    actors: boolean;     // показывать ли actors
-    targets: boolean;    // показывать ли targets
-    data: string[];      // какие ключи data показывать
-  };
-}
-```
+Сделано:
 
-Клиент получает `ViewEvent`: то же событие после проекции, с флагом `redacted`.
+- **Правка движка:** доля Мирных жителей (`minCiviliansShare`, по умолчанию 30% красных мест при 8+ игроках); «пустой» ночной ход (`nightMoveDone`, `allNightMovesDone`); Адвокат не остаётся без Комиссара.
+- **Протокол** (`@mafia/protocol`): версия, типы сообщений, проверка входящих, коды ошибок с русскими текстами, настройки комнаты, коды комнат.
+- **Комнаты:** код из 5 символов без путаных, ссылка `/r/КОД`, пароль хешем PBKDF2, лимит неверных попыток, токен переподключения, лобби с онлайн-статусом, исключение и передача прав, автопередача хоста через 2 минуты, режимы «хост играет» и «ведущий-наблюдатель», запрет входа после старта, удаление через 6 часов простоя.
+- **Настройки:** роли, квоты, правила движка, таймеры (по умолчанию выключены), режим показа: «Скрытный», «Открытый состав», «Кино».
+- **Партия:** ночь с «пустыми» ходами (конец — когда сходили все, по таймеру или по кнопке хоста); отложенные решения только нужному игроку; утренняя синхронизация (`ready`, 15 с, кнопка хоста); день; чат мафии для живых чёрных.
+- **Проверка без интерфейса:** интеграционные тесты внутри workerd; сетевой тест на утечки с перехватом всех сообщений каждого клиента; `npm run bots`; отладочная HTML-страница.
+- **Локальная работа:** `wrangler dev` без входа в Cloudflare.
 
-## Дальше (этап 2, набросок)
+Итог: 325 тестов (223 + 16 + 86), `npm test` зелёный, `npm run typecheck` чистый.
 
-- Durable Object комнаты: лобби → игра → итог; хранение `GameState` в storage.
-- Протокол WebSocket: `hello(token)`, `view`, `events`, `intent(nightAction | vote | decision)`.
-- Таймеры фаз (alarms): по таймауту `resolveNight` / `resolveVote` / `resolvePendingDefault`; досрочно — по `allNightActionsIn` / `allVotesIn`.
-- Рассылка после каждого шага: `viewFor(state, id)` и `projectEvents(state, step.events, id)` каждому игроку.
-- Не выдавать роли паузами: «подтверждение» ночью от всех игроков, постоянная пауза после голосования (Судья).
-- Пароль комнаты: PBKDF2 (WebCrypto) + соль; токен переподключения.
-- Лимит кругов или таймауты против «вечной» партии.
-- Перед началом этапа сверить актуальную документацию Cloudflare (Durable Objects, WebSocket Hibernation, лимиты бесплатного плана).
+Описание протокола, стадий и ограничений — `packages/server/README.md`.
+
+## Этап 3: веб-клиент (набросок)
+
+- Vite + React + TypeScript + Tailwind + Framer Motion, PWA; типы из `@mafia/protocol` и `@mafia/engine`.
+- **Соединение:** один WebSocket на комнату; `hello` с токеном из хранилища браузера, иначе форма имени и пароля; `ping` раз в 20–30 секунд; переподключение с задержкой; коды закрытия 4000–4003 — без повторных попыток.
+- **Состояние клиента:** последний `room`, последний `game`, журнал событий (`history` + `events`), сцены, чат. Клиент ничего не вычисляет сам.
+- **Экраны:** главная (создать / войти), лобби (участники, онлайн, настройки состава и правил для хоста, причины «нельзя начать»), игра (моя роль, стол, ночной ход, голосование, решение, журнал), итог партии.
+- **Ночной ход:** всем показывать одинаковое по виду действие — у мирных это «пустой» ход.
+- **Утро:** проиграть итоги ночи по событиям, затем отправить `ready`.
+- **Обратный отсчёт:** по `deadline − serverTime`, а не по часам клиента.
+- **Разработка:** Vite проксирует `/api` на `wrangler dev` (127.0.0.1:8787); отладочная страница сервера остаётся эталоном поведения.
+- **Раздача статики:** решить, где жить клиенту — статические файлы того же Worker или отдельно; отладочную страницу перенести на свой адрес.
+
+Вопросы к пользователю перед этапом — в `CLAUDE.md`, раздел «Открытые вопросы» (в первую очередь режим «Кино», ведущий-наблюдатель, вечерняя синхронизация).
+
+## Деплой (отдельно)
+
+- `wrangler deploy`, проверка лимитов бесплатного плана на живых партиях.
+- PBKDF2 и лимит процессорного времени.
+- Ограничение частоты создания комнат.
+- Счётчик записей в хранилище: при необходимости реже сохранять промежуточные состояния.

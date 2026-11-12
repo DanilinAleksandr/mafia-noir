@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { EngineError, allNightActionsIn, allVotesIn, currentDecision, pendingNightActors } from '../src/index';
+import {
+  EngineError,
+  allNightActionsIn,
+  allNightMovesDone,
+  allVotesIn,
+  currentDecision,
+  nightMoveDone,
+  pendingNightActors,
+} from '../src/index';
 import { Sim } from './helpers';
 
 describe('Телохранитель и Купидон', () => {
@@ -319,5 +327,33 @@ describe('Готовность ночи', () => {
     g.night();
     expect(g.state.phase).toBe('day');
     expect(g.state.players.every((p) => p.alive)).toBe(true);
+  });
+});
+
+describe('«Пустой» ночной ход', () => {
+  it('nightMoveDone считает ходом и отказ того, кому делать нечего', () => {
+    const g = new Sim(['doctor', 'mafia', 'civilian', 'civilian']);
+    expect(nightMoveDone(g.state, 'p3')).toBe(false);
+    expect(allNightMovesDone(g.state)).toBe(false);
+    // обычная готовность движка «пустых» ходов не ждёт
+    g.act('doctor', 'heal', 'p3').mafia('mafia', 'p4');
+    expect(allNightActionsIn(g.state)).toBe(true);
+    expect(allNightMovesDone(g.state)).toBe(false);
+
+    g.pass('p3');
+    expect(nightMoveDone(g.state, 'p3')).toBe(true);
+    g.pass('p4');
+    expect(allNightMovesDone(g.state)).toBe(true);
+  });
+
+  it('мёртвых не ждут, а после разрешения ночи ходов нет', () => {
+    const g = new Sim(['doctor', 'mafia', 'civilian', 'civilian', 'civilian']);
+    g.mafia('mafia', 'p5').night();
+    expect(nightMoveDone(g.state, 'p1')).toBe(false);
+    g.skipDay();
+    for (const id of ['p1', 'p3', 'p4']) g.pass(id);
+    g.mafia('mafia', null);
+    expect(allNightMovesDone(g.state)).toBe(true);
+    expect(nightMoveDone(g.state, 'p5')).toBe(false);
   });
 });

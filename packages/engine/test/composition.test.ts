@@ -11,6 +11,7 @@ import {
   categoryOf,
   createGame,
   defaultBlackCount,
+  effectiveCiviliansShare,
   generateComposition,
   validateComposition,
 } from '../src/index';
@@ -365,5 +366,132 @@ describe('createGame и состав', () => {
     expect(() =>
       createGame({}, [{ id: 'a', name: 'A', role: 'mafia' }, { id: 'b', name: 'B' }], 'x'),
     ).toThrow(/либо у всех игроков, либо ни у кого/);
+  });
+});
+
+describe('generateComposition: доля Мирных жителей', () => {
+  const civilians = (roles: RoleId[]) => roles.filter((r) => r === 'civilian').length;
+  const reds = (roles: RoleId[]) => count(roles, ['redInfo', 'redDefense', 'redActive', 'redPlain']);
+
+  it('по умолчанию при 8+ игроках Мирным остаётся около 30% красных мест', () => {
+    for (let n = 8; n <= 20; n++) {
+      for (const seed of SEEDS.slice(0, 15)) {
+        const { roles, warnings } = expectOk(generateComposition(n, {}, seed));
+        expect(civilians(roles), `${n} игроков, ${seed}`).toBeGreaterThanOrEqual(Math.round(0.3 * reds(roles)));
+        expect(warnings.some((w) => w.code === 'CIVILIAN_SHARE_UNMET')).toBe(false);
+      }
+    }
+    expect(effectiveCiviliansShare(8, null)).toBe(0.3);
+    expect(effectiveCiviliansShare(7, null)).toBe(0);
+    expect(effectiveCiviliansShare(5, 0.5)).toBe(0.5);
+  });
+
+  it('Мирных ровно столько, сколько требует доля: остальное — особые роли', () => {
+    // при всех включённых ролях особых хватает на любые места, так что Мирных — минимум по доле
+    for (const seed of SEEDS) {
+      const { roles } = expectOk(generateComposition(12, {}, seed));
+      expect(civilians(roles)).toBe(Math.round(0.3 * reds(roles)));
+    }
+  });
+
+  it('при меньшем числе игроков доля по умолчанию не действует', () => {
+    const zero = SEEDS.filter((seed) => civilians(expectOk(generateComposition(7, {}, seed)).roles) === 0);
+    expect(zero.length).toBe(SEEDS.length);
+  });
+
+  it('долю можно отключить и можно задать свою — тогда она действует при любом числе игроков', () => {
+    const off = SEEDS.map((seed) => expectOk(generateComposition(12, { composition: { minCiviliansShare: 0 } }, seed)).roles);
+    expect(off.every((roles) => civilians(roles) === 0)).toBe(true);
+
+    for (const seed of SEEDS) {
+      const half = expectOk(generateComposition(10, { composition: { minCiviliansShare: 0.5 } }, seed)).roles;
+      expect(civilians(half)).toBeGreaterThanOrEqual(Math.round(0.5 * reds(half)));
+      const small = expectOk(generateComposition(6, { composition: { minCiviliansShare: 0.5 } }, seed)).roles;
+      expect(civilians(small)).toBeGreaterThanOrEqual(Math.round(0.5 * reds(small)));
+    }
+    const all = expectOk(generateComposition(10, { composition: { minCiviliansShare: 1 } }, 'x')).roles;
+    expect(civilians(all)).toBe(reds(all));
+  });
+
+  it('доля складывается с квотами: минимумы категорий важнее', () => {
+    const config: GameConfigInput = {
+      composition: { quotas: { redInfo: { min: 2 }, redDefense: { min: 2 }, black: { exact: 2 }, neutral: { exact: 0 } } },
+    };
+    for (const seed of SEEDS) {
+      const { roles } = expectOk(generateComposition(10, config, seed));
+      expect(count(roles, ['redInfo'])).toBeGreaterThanOrEqual(2);
+      expect(count(roles, ['redDefense'])).toBeGreaterThanOrEqual(2);
+      expect(civilians(roles)).toBe(2); // round(0.3 * 8)
+    }
+  });
+
+  it('если квоты не оставляют места Мирным, состав собирается с предупреждением', () => {
+    const config: GameConfigInput = {
+      composition: {
+        quotas: { redInfo: { exact: 3 }, redDefense: { exact: 3 }, black: { exact: 2 }, neutral: { exact: 0 }, red: { exact: 6 } },
+      },
+    };
+    const result = expectOk(generateComposition(8, config, 'x'));
+    expect(civilians(result.roles)).toBe(0);
+    const warning = result.warnings.find((w) => w.code === 'CIVILIAN_SHARE_UNMET');
+    expect(warning?.message).toContain('получилось 0');
+    expect(warning?.message).toContain('нужно 2');
+  });
+
+  it('если Мирный житель выключен, доля уступает: состав из особых ролей и предупреждение', () => {
+    const config: GameConfigInput = { composition: { roles: { civilian: { enabled: false } } } };
+    const result = expectOk(generateComposition(10, config, 'x'));
+    expect(civilians(result.roles)).toBe(0);
+    expect(result.warnings.some((w) => w.code === 'CIVILIAN_SHARE_UNMET')).toBe(true);
+  });
+
+  it('некорректная доля — понятная ошибка', () => {
+    for (const bad of [-0.1, 1.5, Number.NaN]) {
+      const errors = expectErrors(generateComposition(10, { composition: { minCiviliansShare: bad } }));
+      expect(errors[0]).toMatchObject({ code: 'SHARE_INVALID' });
+    }
+  });
+});
+
+describe('generateComposition: роли с зависимостями', () => {
+  it('Адвокат попадает в состав, только если в нём уже есть Комиссар', () => {
+    let withLawyer = 0;
+    for (let n = 6; n <= 16; n++) {
+      for (const seed of SEEDS) {
+        const { roles, warnings } = expectOk(generateComposition(n, {}, seed));
+        if (roles.includes('lawyer')) {
+          withLawyer++;
+          expect(roles, `${n} игроков, ${seed}`).toContain('commissioner');
+        }
+        expect(warnings.some((w) => w.code === 'ROLE_USELESS')).toBe(false);
+      }
+    }
+    // при этом Адвокат в составах встречается
+    expect(withLawyer).toBeGreaterThan(10);
+  });
+
+  it('если Комиссара поставить некуда, Адвоката заменяет другая чёрная роль', () => {
+    // красных информационных в составе нет вовсе — Комиссару нет места
+    const config: GameConfigInput = { composition: { quotas: { redInfo: { exact: 0 } } } };
+    for (const seed of SEEDS) {
+      const { roles, warnings } = expectOk(generateComposition(12, config, seed));
+      expect(roles).not.toContain('lawyer');
+      expect(roles).not.toContain('commissioner');
+      expect(warnings.some((w) => w.code === 'ROLE_USELESS')).toBe(false);
+      expect(count(roles, ['black'])).toBe(defaultBlackCount(12));
+    }
+  });
+
+  it('если иначе квоту не закрыть, роль берётся и без пары — с предупреждением', () => {
+    const config: GameConfigInput = {
+      composition: {
+        roles: { ...only('lawyer', 'commissioner', 'doctor', 'civilian') },
+        quotas: { black: { exact: 1 }, redInfo: { exact: 0 } },
+      },
+    };
+    const result = expectOk(generateComposition(6, config, 'x'));
+    expect(result.roles).toContain('lawyer');
+    expect(result.roles).not.toContain('commissioner');
+    expect(result.warnings.some((w) => w.code === 'ROLE_USELESS' && w.role === 'lawyer')).toBe(true);
   });
 });

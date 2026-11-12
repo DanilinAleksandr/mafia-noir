@@ -1,7 +1,7 @@
 /**
  * Генератор состава: раскладывает роли по слотам так, чтобы выполнялись квоты по категориям.
  */
-import { MIN_PLAYERS, resolveConfig } from './config';
+import { CIVILIANS_SHARE_FROM_PLAYERS, DEFAULT_CIVILIANS_SHARE, MIN_PLAYERS, resolveConfig } from './config';
 import { createRng, seedToState } from './rng';
 import { ROLE_LIST, ROLES, categoryOf, isRoleId, teamOf } from './roles';
 import type { Category, GameConfigInput, Quota, QuotaKey, RoleId, Rules } from './types';
@@ -19,7 +19,9 @@ export type CompositionIssueCode =
   | 'BLACK_NOT_MINORITY'
   | 'ROLE_USELESS'
   | 'NO_INFO_ROLES'
-  | 'ROLE_SKIPPED';
+  | 'ROLE_SKIPPED'
+  | 'SHARE_INVALID'
+  | 'CIVILIAN_SHARE_UNMET';
 
 export interface CompositionIssue {
   code: CompositionIssueCode;
@@ -206,6 +208,24 @@ export function generateComposition(
     return { ok: true, roles, counts: check.counts, warnings: check.warnings };
   }
 
+  // ── доля Мирных жителей ──
+  const rawShare = cfg.composition.minCiviliansShare;
+  if (rawShare !== null && (typeof rawShare !== 'number' || !(rawShare >= 0 && rawShare <= 1))) {
+    return {
+      ok: false,
+      errors: [
+        {
+          code: 'SHARE_INVALID',
+          key: 'redPlain',
+          message: 'Доля Мирных жителей должна быть числом от 0 до 1',
+        },
+      ],
+    };
+  }
+  const share = effectiveCiviliansShare(n, rawShare);
+  /** Сколько Мирных нужно при данном числе красных мест. */
+  const civiliansTarget = (redTotal: number): number => Math.round(share * redTotal);
+
   // ── какие роли доступны и сколько копий ──
   const warnings: CompositionIssue[] = [];
   const settings = cfg.composition.roles;
@@ -354,6 +374,7 @@ export function generateComposition(
     }
   }
   // 2. остаток: случайные особые роли, затем Мирные
+  const specialIds = ROLE_LIST.map((d) => d.id).filter((id) => id !== 'civilian' && limit[id] !== undefined);
   while (roles.length < n) {
     const remaining = n - roles.length;
     const redNow = redCount();
@@ -365,11 +386,24 @@ export function generateComposition(
       // красным нужен запас под их минимум, красных не больше максимума
       return isRed ? redNow < redHi : remaining > redDeficit;
     };
-    const special = ROLE_LIST.map((d) => d.id).filter((id) => id !== 'civilian' && limit[id] !== undefined && fits(id));
+    // Доля Мирных: особую роль берём, только если оставшихся мест ещё хватит Мирным.
+    // Лучший для Мирных исход — отдать им все остальные места; если и его мало, роль не берём.
+    const leavesRoomForCivilians = (id: RoleId): boolean => {
+      if (share <= 0) return true;
+      const isRed = RED_LEAVES.includes(categoryOf(id, rules));
+      const redTotal = redNow + remaining - (isRed ? 0 : 1);
+      return counts.redPlain + remaining - 1 >= civiliansTarget(redTotal);
+    };
+    const fitting = specialIds.filter(fits);
+    const special = fitting.filter(leavesRoomForCivilians);
+    const civilianFits = limit.civilian !== undefined && fits('civilian');
     if (special.length > 0) {
       add(rng.pick(special));
-    } else if (limit.civilian !== undefined && fits('civilian')) {
+    } else if (civilianFits) {
       add('civilian');
+    } else if (fitting.length > 0) {
+      // Мирных добавить нельзя (выключены или упёрлись в квоту) — доля уступает квотам
+      add(rng.pick(fitting));
     } else {
       // недостижимо после проверок выше; оставлено как страховка
       return {
@@ -384,8 +418,57 @@ export function generateComposition(
     }
   }
 
+  // 3. роли с зависимостями: Адвокат бесполезен без Комиссара.
+  //    Замены идут внутри одной категории, поэтому квоты и доля Мирных не нарушаются.
+  const swap = (from: RoleId, to: RoleId): void => {
+    roles[roles.indexOf(from)] = to;
+    taken[from] = (taken[from] ?? 0) - 1;
+    taken[to] = (taken[to] ?? 0) + 1;
+  };
+  const inComposition = (id: RoleId): boolean => (taken[id] ?? 0) > 0;
+  const isNeeded = (id: RoleId): boolean => roles.some((r) => ROLES[r].needs.includes(id));
+  for (const def of ROLE_LIST) {
+    if (!inComposition(def.id)) continue;
+    for (const need of def.needs) {
+      if (inComposition(need)) continue;
+      // а) нужная роль встаёт на место другой роли своей категории
+      const needCat = categoryOf(need, rules);
+      const replaceable = [...new Set(roles)].filter(
+        (r) => categoryOf(r, rules) === needCat && ROLES[r].needs.length === 0 && !isNeeded(r),
+      );
+      if (free(need) && replaceable.length > 0) {
+        swap(rng.pick(replaceable), need);
+        continue;
+      }
+      // б) иначе сама роль уступает место другой роли своей категории
+      const ownCat = categoryOf(def.id, rules);
+      const alternatives = pools[ownCat].filter(
+        (r) => r !== def.id && free(r) && ROLES[r].needs.every(inComposition),
+      );
+      if (alternatives.length > 0) {
+        swap(def.id, rng.pick(alternatives));
+        break;
+      }
+      // в) заменить нечем — роль остаётся, validateComposition добавит предупреждение
+    }
+  }
+
   const check = validateComposition(roles, rules);
   if (check.errors.length > 0) return { ok: false, errors: check.errors };
+  const wanted = civiliansTarget(redCount());
+  if (counts.redPlain < wanted) {
+    warnings.push({
+      code: 'CIVILIAN_SHARE_UNMET',
+      key: 'redPlain',
+      message: `Мирных жителей получилось ${counts.redPlain}, а по доле ${Math.round(share * 100)}% от красных нужно ${wanted}: мешают квоты или лимит Мирных`,
+    });
+  }
   roles.sort((a, b) => ROLE_IDS.indexOf(a) - ROLE_IDS.indexOf(b));
   return { ok: true, roles, counts, warnings: [...warnings, ...check.warnings] };
+}
+
+/** Какая доля красных мест отводится Мирным при данном числе игроков и конфиге. */
+export function effectiveCiviliansShare(playerCount: number, minCiviliansShare: number | null): number {
+  if (minCiviliansShare !== null) return minCiviliansShare;
+  return playerCount >= CIVILIANS_SHARE_FROM_PLAYERS ? DEFAULT_CIVILIANS_SHARE : 0;
 }

@@ -1,7 +1,25 @@
 {
   "name": "@mafia/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Каркас: Cloudflare Worker + Durable Objects (этап 2)",
-  "type": "module"
+  "description": "Сервер «Мафии»: Cloudflare Worker + Durable Objects с WebSocket Hibernation",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tools.json",
+    "bots": "tsx tools/bots.ts"
+  },
+  "dependencies": {
+    "@mafia/engine": "*",
+    "@mafia/protocol": "*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.0",
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "wrangler": "^4.160.1"
+  }
 }
