@@ -2,8 +2,8 @@
  * Чистые функции, которые собирают из состояния комнаты то, что уходит клиентам.
  */
 import { ROLE_IDS, findAbility } from '@mafia/engine';
-import type { GameEvent, GameState, PlayerId, RoleId } from '@mafia/engine';
-import type { GameStage, RoleCount, Scene } from '@mafia/protocol';
+import type { AbilityId, GameEvent, GameState, PlayerId, RoleId } from '@mafia/engine';
+import type { DisplayMode, GameStage, RoleCount, Scene } from '@mafia/protocol';
 import type { RoomState } from './state';
 
 /** Стадия партии с точки зрения сервера. */
@@ -23,17 +23,25 @@ export function compositionOf(game: GameState): RoleCount[] {
   return ROLE_IDS.filter((role) => counts.has(role)).map((role) => ({ role, count: counts.get(role) as number }));
 }
 
+/** Способности, которые в режиме «Скрытный» сценами не становятся: они выдали бы информационные роли. */
+export const STEALTH_HIDDEN_ABILITIES: readonly AbilityId[] = ['check', 'investigate', 'scout', 'compare', 'stay'];
+
 /**
- * Личные сцены игрока для режима «Кино»: кто из ролей ночью подействовал на него.
+ * Личные сцены игрока: какие роли ночью подействовали на него.
  *
  * Сцена строится по событию `abilityUsed`, если игрок — цель способности, а не её автор.
- * В сцену попадает роль применившего, но не его id. Нападения (Маньяк, яд Ведьмы) и убийство
- * мафии сценами не становятся никогда: убийца не раскрывается. Наблюдение Патрульного — тоже:
- * он следит со стороны и к игроку не приходит.
+ * В сцену попадает роль применившего (в «Скрытном» — null), но не его id. Нападения (Маньяк,
+ * яд Ведьмы) и убийство мафии сценами не становятся никогда: убийца не раскрывается.
+ * Наблюдение Патрульного — тоже: он следит со стороны и к игроку не приходит.
  *
  * @param events события, по которым строить сцены (шаг или весь журнал)
  */
-export function personalScenes(game: GameState, events: readonly GameEvent[], playerId: PlayerId): Scene[] {
+export function personalScenes(
+  game: GameState,
+  events: readonly GameEvent[],
+  playerId: PlayerId,
+  display: DisplayMode = 'cinema',
+): Scene[] {
   const scenes: Scene[] = [];
   for (const event of events) {
     if (event.type !== 'abilityUsed') continue;
@@ -42,6 +50,7 @@ export function personalScenes(game: GameState, events: readonly GameEvent[], pl
     const actor = game.players.find((p) => p.id === actorId);
     const ability = actor ? findAbility(actor.role, event.data.ability) : undefined;
     if (!actor || !ability || ability.step === 'attack' || !ability.visit) continue;
+    if (display === 'stealth' && STEALTH_HIDDEN_ABILITIES.includes(ability.id)) continue;
     const saved = game.log.some(
       (e) =>
         e.type === 'saved' &&
@@ -50,7 +59,13 @@ export function personalScenes(game: GameState, events: readonly GameEvent[], pl
         e.actors[0] === actorId &&
         e.targets[0] === playerId,
     );
-    scenes.push({ id: event.id, round: event.round, ability: event.data.ability, role: actor.role, saved });
+    scenes.push({
+      id: event.id,
+      round: event.round,
+      ability: event.data.ability,
+      role: display === 'stealth' ? null : actor.role,
+      saved,
+    });
   }
   return scenes;
 }

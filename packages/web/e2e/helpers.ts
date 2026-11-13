@@ -52,24 +52,26 @@ async function visible(page: Page, selector: string): Promise<boolean> {
 async function clickIfVisible(page: Page, selector: string): Promise<boolean> {
   const target = page.locator(selector).first();
   if (!(await target.isVisible().catch(() => false))) return false;
-  await target.click({ timeout: 3000 }).catch(() => undefined);
-  return true;
+  // неудачный клик (элемент перекрыт) — не действие: пусть сработают следующие ветки
+  return target.click({ timeout: 3000 }).then(() => true).catch(() => false);
 }
 
 /** Выбрать в сетке первых доступных игроков и нажать главную кнопку панели. */
-async function playPicker(scope: ReturnType<Page['locator']>, mainButton: RegExp): Promise<boolean> {
+async function playPicker(scope: ReturnType<Page['locator']>, mainButton: RegExp | string): Promise<boolean> {
   try {
     return await playPickerUnsafe(scope, mainButton);
-  } catch {
+  } catch (error) {
     // экран сменился посреди хода (пришёл новый снимок) — попробуем на следующем круге
+    if (process.env.E2E_DEBUG) console.log('playPicker:', String(error).slice(0, 400));
     return false;
   }
 }
 
-async function playPickerUnsafe(scope: ReturnType<Page['locator']>, mainButton: RegExp): Promise<boolean> {
-  const options = scope.locator('[role="option"][aria-disabled="false"]');
+async function playPickerUnsafe(scope: ReturnType<Page['locator']>, mainButton: RegExp | string): Promise<boolean> {
+  // в общей ночной панели (uniform) недоступные не помечены — берём всех, лишние нажатия игнорируются
+  const options = scope.locator('[role="option"]:not([aria-disabled="true"])');
   const count = await options.count();
-  const main = scope.getByRole('button', { name: mainButton });
+  const main = typeof mainButton === 'string' ? scope.getByTestId(mainButton) : scope.getByRole('button', { name: mainButton });
   if (count === 0) {
     // выбрать некого — пропуск / воздержаться
     const skip = scope.getByRole('button', { name: /Пропустить|Воздержаться|Не стрелять/ });
@@ -109,15 +111,41 @@ export async function takeRole(page: Page): Promise<string> {
 
 /** Один ход вкладки-игрока: досмотреть сцену, сходить ночью, проголосовать, решить. */
 export async function playStep(page: Page, options: { host?: boolean } = {}): Promise<StepResult> {
+  const r = await playStepInner(page, options);
+  if (process.env.E2E_DEBUG) console.log('ret', lastBranch, r);
+  return r;
+}
+
+let lastBranch = '';
+
+async function playStepInner(page: Page, options: { host?: boolean } = {}): Promise<StepResult> {
+  lastBranch = 'role-ok';
   if (await clickIfVisible(page, '[data-testid="role-ok"]')) return 'acted';
+  lastBranch = 'deck';
   if (await visible(page, '[data-scene="deck"]')) {
     // тап по сцене: к колоде → взять карту → к концу
     await page.locator('[data-scene="deck"]').click({ position: { x: 30, y: 120 }, timeout: 3000 }).catch(() => undefined);
     return 'acted';
   }
+  lastBranch = 'report';
   if (await clickIfVisible(page, '[data-testid="report-ready"]')) return 'acted';
+  // идёт сцена (утро) — тап пропускает анимацию к сводке с «Готов»
+  lastBranch = 'scene';
+  const scene = page.locator('[data-scene="morning"]');
+  if ((await scene.isVisible().catch(() => false)) && !(await page.getByTestId('report-ready').isVisible().catch(() => false))) {
+    await scene.click({ position: { x: 20, y: 60 }, timeout: 3000 }).catch(() => undefined);
+    return 'acted';
+  }
+  lastBranch = 'finale';
   if (await clickIfVisible(page, '[data-testid="finale-ok"]')) return 'acted';
   if (await visible(page, '[data-testid="final"]')) return 'final';
+  // своя способность чёрных — в «Блокноте»
+  lastBranch = 'side';
+  const side = page.locator('[data-testid="side-ability"][data-done="0"]').first();
+  if (await side.isVisible().catch(() => false)) {
+    return (await playPicker(side, 'side-apply')) ? 'acted' : 'idle';
+  }
+  lastBranch = 'dialog';
   if (await visible(page, '[role="dialog"]')) {
     await page.keyboard.press('Escape');
     return 'acted';
@@ -135,7 +163,9 @@ export async function playStep(page: Page, options: { host?: boolean } = {}): Pr
   if (stage === 'night' || stage === 'day') {
     const panel = page.locator('section.panel').filter({ has: page.getByRole('listbox') }).first();
     if (await panel.isVisible().catch(() => false)) {
-      return (await playPicker(panel, /Сделать ход|Проголосовать/)) ? 'acted' : 'idle';
+      const ok = await playPicker(panel, /Сделать ход|Проголосовать/);
+      if (process.env.E2E_DEBUG) console.log('step', stage, ok);
+      return ok ? 'acted' : 'idle';
     }
     return 'idle';
   }

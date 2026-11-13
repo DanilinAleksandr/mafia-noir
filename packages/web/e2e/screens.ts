@@ -24,9 +24,17 @@ async function pick(page: Page, scopeText: RegExp | null, target: string, button
   const scope = scopeText ? page.locator('section.panel').filter({ hasText: scopeText }) : page.locator('section.panel').filter({ has: page.getByRole('listbox') }).first();
   await scope.getByRole('option', { name: target, exact: true }).click();
   await scope.getByRole('button', { name: button }).click();
+  // после ночного хода у всех открывается «Блокнот» — закрываем
+  const dialog = page.getByRole('dialog');
+  if (await dialog.waitFor({ timeout: 1500 }).then(() => true).catch(() => false)) {
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'detached', timeout: 3000 }).catch(() => undefined);
+  }
 }
 
 async function ready(page: Page): Promise<void> {
+  const scene = page.locator('[data-scene="morning"]');
+  if (await scene.isVisible().catch(() => false)) await scene.click({ position: { x: 20, y: 60 } }).catch(() => undefined);
   await page.getByTestId('report-ready').click();
 }
 
@@ -132,6 +140,9 @@ test('скриншоты экранов', async ({ browser }) => {
 
   // утро: итоги ночи, личная карточка Комиссара (проверка + сцена «Кино»)
   for (const p of players) await expect(p.page.getByTestId('night-report')).toBeVisible();
+  await comm.page.waitForTimeout(2600);
+  await shot(comm.page, '15a-morning-scene');
+  await comm.page.locator('[data-scene="morning"]').click({ position: { x: 20, y: 60 } });
   await comm.page.getByTestId('private-card').click();
   await shot(comm.page, '15-morning-private');
   await shot(civ.page, '15b-morning');

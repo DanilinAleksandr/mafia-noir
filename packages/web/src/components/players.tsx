@@ -3,7 +3,7 @@
  */
 import type { PlayerId, RoleId, Team, ViewPlayer } from '@mafia/engine';
 import { motion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { roleName, t } from '../i18n';
 import { TEAM_CLASS } from '../theme/tokens';
 import { IconCheck, IconCrown, IconHeart, IconMute, IconSkull } from './icons';
@@ -141,6 +141,7 @@ export function PlayerPicker({
   disabled,
   marks,
   me,
+  uniform = false,
 }: {
   players: ViewPlayer[];
   /** Кого можно выбрать; остальные видны, но неактивны. */
@@ -152,9 +153,22 @@ export function PlayerPicker({
   /** Подписи под плитками (голоса команды, «проголосовал»). */
   marks?: Partial<Record<PlayerId, ReactNode>>;
   me?: PlayerId | null;
+  /**
+   * Одинаковый вид для всех ролей (ночь): недоступные игроки не затемняются и не помечаются,
+   * нажатие на них лишь слегка встряхивает плитку. Так по экрану не видно, кого нельзя выбрать.
+   */
+  uniform?: boolean;
 }) {
+  const [shake, setShake] = useState<PlayerId | null>(null);
   const toggle = (id: PlayerId) => {
-    if (disabled || !candidates.includes(id)) return;
+    if (disabled) return;
+    if (!candidates.includes(id)) {
+      if (uniform) {
+        setShake(id);
+        setTimeout(() => setShake((s) => (s === id ? null : s)), 400);
+      }
+      return;
+    }
     if (selected.includes(id)) onChange(selected.filter((x) => x !== id));
     else if (max === 1) onChange([id]);
     else if (selected.length < max) onChange([...selected, id]);
@@ -172,14 +186,16 @@ export function PlayerPicker({
             type="button"
             role="option"
             aria-selected={on}
-            aria-disabled={!can}
+            aria-disabled={uniform ? undefined : !can}
             aria-label={p.name}
-            whileTap={can && !disabled ? { scale: 0.95 } : undefined}
+            whileTap={(can || uniform) && !disabled ? { scale: 0.95 } : undefined}
+            animate={shake === p.id ? { x: [0, -6, 6, -4, 4, 0] } : { x: 0 }}
+            transition={{ duration: 0.35 }}
             onClick={() => toggle(p.id)}
             className={cx(
               'relative flex flex-col items-center gap-1.5 rounded-2xl border px-1.5 pt-3 pb-2.5 text-center transition',
               on ? 'border-phase-accent bg-phase-soft shadow-[0_0_0_1px_var(--phase-accent)]' : 'border-white/8 bg-black/25',
-              !can && 'opacity-35',
+              !can && !uniform && 'opacity-35',
             )}
           >
             <Avatar name={p.name} id={p.id} size={44} />

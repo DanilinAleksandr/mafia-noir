@@ -141,14 +141,18 @@ function DecoCorners({ color }: { color: string }) {
 
 // ───────────────────────────── лицо ─────────────────────────────
 
-/** Процедурная иллюстрация: гильош, лучи и медальон с эмблемой в цвете команды. */
-function ProceduralArt({ role, palette, id }: { role: RoleId; palette: TeamPalette; id: string }) {
+/**
+ * Процедурная иллюстрация в композиции настоящего арта: верхние ~17% свободны под название,
+ * «персонаж» (медальон с эмблемой) — ниже центра, низ карточки открыт.
+ */
+function ProceduralArt({ palette, id }: { palette: TeamPalette; id: string }) {
+  const cy = 176;
   return (
     <svg viewBox="0 0 200 300" className="absolute inset-0 h-full w-full" aria-hidden>
       <defs>
-        <radialGradient id={`${id}-bg`} cx="50%" cy="38%" r="75%">
+        <radialGradient id={`${id}-bg`} cx="50%" cy="58%" r="70%">
           <stop offset="0%" stopColor={palette.primary} stopOpacity="0.85" />
-          <stop offset="45%" stopColor={palette.deep} />
+          <stop offset="48%" stopColor={palette.deep} />
           <stop offset="100%" stopColor="#040304" />
         </radialGradient>
         <radialGradient id={`${id}-halo`} cx="50%" cy="50%" r="50%">
@@ -156,32 +160,43 @@ function ProceduralArt({ role, palette, id }: { role: RoleId; palette: TeamPalet
           <stop offset="70%" stopColor={palette.trim} stopOpacity="0.06" />
           <stop offset="100%" stopColor={palette.trim} stopOpacity="0" />
         </radialGradient>
+        <linearGradient id={`${id}-floor`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#000" stopOpacity="0" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
+        </linearGradient>
       </defs>
       <rect width="200" height="300" fill={`url(#${id}-bg)`} />
-      {/* гильош: эллипсы, повёрнутые вокруг центра */}
-      <g fill="none" stroke={palette.trim} strokeOpacity="0.13" strokeWidth="0.5" transform="translate(100 118)">
+      {/* гильош вокруг «персонажа» */}
+      <g fill="none" stroke={palette.trim} strokeOpacity="0.13" strokeWidth="0.5" transform={`translate(100 ${cy})`}>
         {Array.from({ length: 30 }, (_, i) => (
-          <ellipse key={i} rx="78" ry="30" transform={`rotate(${i * 6})`} />
+          <ellipse key={i} rx="80" ry="31" transform={`rotate(${i * 6})`} />
         ))}
       </g>
-      <g stroke={palette.trim} strokeOpacity="0.16" strokeWidth="0.6">
+      <g stroke={palette.trim} strokeOpacity="0.15" strokeWidth="0.6">
         {Array.from({ length: 24 }, (_, i) => {
           const a = (i / 24) * Math.PI * 2;
-          return <line key={i} x1={100 + Math.cos(a) * 62} y1={118 + Math.sin(a) * 62} x2={100 + Math.cos(a) * 200} y2={118 + Math.sin(a) * 200} />;
+          return <line key={i} x1={100 + Math.cos(a) * 64} y1={cy + Math.sin(a) * 64} x2={100 + Math.cos(a) * 210} y2={cy + Math.sin(a) * 210} />;
         })}
       </g>
-      <circle cx="100" cy="118" r="72" fill={`url(#${id}-halo)`} />
-      <circle cx="100" cy="118" r="50" fill={palette.deep} fillOpacity="0.85" stroke={palette.trim} strokeWidth="1.3" />
-      <circle cx="100" cy="118" r="44" fill="none" stroke={palette.trim} strokeOpacity="0.4" strokeWidth="0.7" strokeDasharray="1.5 2.5" />
-      {/* звёздочки по кругу медальона */}
+      <circle cx="100" cy={cy} r="74" fill={`url(#${id}-halo)`} />
+      <circle cx="100" cy={cy} r="54" fill={palette.deep} fillOpacity="0.85" stroke={palette.trim} strokeWidth="1.3" />
+      <circle cx="100" cy={cy} r="47" fill="none" stroke={palette.trim} strokeOpacity="0.4" strokeWidth="0.7" strokeDasharray="1.5 2.5" />
       {[0, 90, 180, 270].map((deg) => (
-        <path key={deg} d="M100 64 L102.5 68 L100 72 L97.5 68 Z" fill={palette.trim} transform={`rotate(${deg} 100 118)`} />
+        <path key={deg} d={`M100 ${cy - 58} L102.5 ${cy - 54} L100 ${cy - 50} L97.5 ${cy - 54} Z`} fill={palette.trim} transform={`rotate(${deg} 100 ${cy})`} />
       ))}
+      <rect y="230" width="200" height="70" fill={`url(#${id}-floor)`} />
     </svg>
   );
 }
 
-export function CardFace({ role, team, width, detailed = false }: { role: RoleId; team: Team; width: number; detailed?: boolean }) {
+/** Кегль названия: крупно, но чтобы длинное название влезло в ширину карточки. */
+function titleSize(name: string, width: number): number {
+  const longest = Math.max(...name.split(' ').map((w) => w.length));
+  const perLine = name.length > 9 ? Math.max(longest, Math.ceil(name.length / 2)) : name.length;
+  return Math.round(Math.min(width * 0.17, (width * 0.82) / (perLine * 0.44)));
+}
+
+export function CardFace({ role, team, width }: { role: RoleId; team: Team; width: number; detailed?: boolean }) {
   const id = useId().replace(/:/g, '');
   const palette = TEAM_PALETTE[team];
   const art = roleArt(role);
@@ -208,63 +223,58 @@ export function CardFace({ role, team, width, detailed = false }: { role: RoleId
     );
   }
 
-  const nameSize = Math.max(14, Math.round(width * (text.name.length > 11 ? 0.095 : 0.115)));
+  const size = titleSize(text.name, width);
+  const twoLines = text.name.includes(' ') && text.name.length > 9;
   return (
     <div
       data-testid="card-face"
       data-role={role}
-      className="absolute inset-0 overflow-hidden border"
+      className="absolute inset-0 overflow-hidden border-2"
       style={{
         borderRadius: radius,
         borderColor: palette.trim,
         color: palette.ink,
-        boxShadow: `var(--shadow-card), 0 0 ${Math.round(width * 0.25)}px -${Math.round(width * 0.08)}px ${palette.primary}`,
+        // цвет команды — свечением и рамкой
+        boxShadow: `var(--shadow-card), 0 0 ${Math.round(width * 0.22)}px -${Math.round(width * 0.04)}px ${palette.primary}, inset 0 0 ${Math.round(width * 0.12)}px -${Math.round(width * 0.03)}px ${palette.primary}`,
       }}
     >
       {/* слой иллюстрации (с лёгким параллаксом в голограмме) */}
       <div className="holo-layer absolute -inset-[4%]" style={{ ['--depth' as string]: '-6px' }}>
-        {art ? <img src={art} alt="" className="h-full w-full object-cover" draggable={false} /> : <ProceduralArt role={role} palette={palette} id={id} />}
+        {art ? <img src={art} alt="" className="h-full w-full object-cover" draggable={false} /> : <ProceduralArt palette={palette} id={id} />}
       </div>
       {!art ? (
         <div
           className="holo-layer absolute inset-x-0 flex justify-center"
-          style={{ top: width * 0.22, ['--depth' as string]: '10px', color: palette.ink }}
+          style={{ top: width * 0.72, ['--depth' as string]: '10px', color: palette.ink }}
         >
-          <RoleEmblem
-            role={role}
-            size={Math.round(width * 0.3)}
-            className="drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]"
-          />
+          <RoleEmblem role={role} size={Math.round(width * 0.32)} className="drop-shadow-[0_0_10px_rgba(255,255,255,0.25)]" />
         </div>
       ) : null}
+      {/* мягкое затемнение под названием — не табличка, просто чтобы читалось на любом арте */}
+      <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: '24%', background: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0))' }} />
       {/* рамка — всегда кодом */}
       <svg viewBox="0 0 200 300" className="absolute inset-0 h-full w-full" aria-hidden preserveAspectRatio="none">
         <rect x="6" y="6" width="188" height="288" rx="11" fill="none" stroke={palette.trim} strokeOpacity="0.9" strokeWidth="1.3" />
         <rect x="12" y="12" width="176" height="276" rx="8" fill="none" stroke={palette.trim} strokeOpacity="0.35" strokeWidth="0.7" />
         <DecoCorners color={palette.trim} />
-        {/* табличка под название */}
-        <path d="M12 222 L188 222 L188 288 Q188 288 180 288 L20 288 Q12 288 12 280 Z" fill={`url(#${id}-plate)`} />
-        <defs>
-          <linearGradient id={`${id}-plate`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#000" stopOpacity="0" />
-            <stop offset="35%" stopColor="#000" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#000" stopOpacity="0.9" />
-          </linearGradient>
-        </defs>
-        <path d="M40 230 L92 230 L100 224 L108 230 L160 230" fill="none" stroke={palette.trim} strokeOpacity="0.8" strokeWidth="0.9" />
       </svg>
-      <div className="absolute inset-x-0 bottom-0 px-3 text-center" style={{ paddingBottom: width * 0.075 }}>
-        <div className="font-bold uppercase opacity-85" style={{ color: palette.trim, fontSize: Math.max(9, width * 0.045), letterSpacing: '0.24em' }}>
-          {t.teams[team].name}
-        </div>
-        <div className="font-display leading-[1.05] font-bold" style={{ fontSize: nameSize, textShadow: `0 0 18px ${palette.primary}` }}>
+      {/* название — сверху, над головой персонажа, рукописным шрифтом с сиянием цвета команды */}
+      <div
+        className="holo-layer absolute inset-x-0 top-0 flex items-center justify-center px-[9%] text-center"
+        style={{ height: twoLines ? '24%' : '18%', paddingTop: width * 0.04, ['--depth' as string]: '4px' }}
+      >
+        <span
+          className="font-hand leading-[0.9] font-bold"
+          data-testid="card-title"
+          style={{
+            fontSize: size,
+            color: palette.ink,
+            textShadow: `0 0 ${Math.round(size * 0.35)}px ${palette.primary}, 0 0 ${Math.round(size * 0.12)}px ${palette.primary}, 0 2px 2px rgba(0,0,0,0.8)`,
+            transform: 'rotate(-2deg)',
+          }}
+        >
           {text.name}
-        </div>
-        {detailed && width >= 170 ? (
-          <p className="mx-auto mt-1 max-w-[88%] leading-snug opacity-80" style={{ fontSize: Math.max(11, width * 0.052) }}>
-            {text.short}
-          </p>
-        ) : null}
+        </span>
       </div>
     </div>
   );

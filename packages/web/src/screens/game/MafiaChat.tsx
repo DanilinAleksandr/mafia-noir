@@ -4,12 +4,14 @@
  * команды за жертву; у остальных — личные заметки, которые хранятся только на этом устройстве.
  * Ведущий читает чат мафии без права писать (MafiaChat с readOnly).
  */
-import type { PlayerId } from '@mafia/engine';
+import type { AbilityId, AbilityOption, PlayerId } from '@mafia/engine';
 import { LIMITS } from '@mafia/protocol';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import { Button, cx } from '../../components/ui';
+import { PlayerPicker } from '../../components/players';
+import { Button, Segmented, cx } from '../../components/ui';
 import { t } from '../../i18n';
 import { useRoomState, useStore } from '../../store/context';
+import { mainMove, sideAbilities } from './nightPlan';
 import { useNames } from './useNames';
 
 interface Bubble {
@@ -103,6 +105,95 @@ function TeamVotes({ votes }: { votes: Record<PlayerId, PlayerId | null> }) {
   );
 }
 
+/** Своя способность чёрного (вдобавок к голосу в общей панели) — выполняется здесь. */
+function SideAbility({ option }: { option: AbilityOption }) {
+  const store = useStore();
+  const { game } = useRoomState();
+  const view = game!.view;
+  const submitted = view.night!.submitted;
+  const name = useNames();
+  const [selected, setSelected] = useState<PlayerId[]>([]);
+  const done = submitted.ability !== undefined;
+  const send = async (pass: boolean) => {
+    const reply = pass
+      ? await store.night({ kind: 'pass' })
+      : await store.night({ kind: 'ability', ability: option.id, targets: selected });
+    if (reply.ok) setSelected([]);
+  };
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/30 p-3" data-testid="side-ability" data-done={done ? '1' : '0'}>
+      <p className="mb-2 text-sm">
+        {t.abilities[option.id].prompt}
+        {done ? (
+          <span className="block text-xs text-ok">
+            {submitted.ability ? `${t.abilities[submitted.ability.id].label}: ${submitted.ability.targets.map(name).join(', ')}` : t.game.night.skip}
+          </span>
+        ) : null}
+      </p>
+      <PlayerPicker players={view.players} candidates={option.candidates} selected={selected} max={option.targets} onChange={setSelected} me={view.you?.id ?? null} />
+      <div className="mt-3 flex gap-2">
+        <Button tone="quiet" size="sm" block onClick={() => void send(true)}>
+          {t.game.night.skip}
+        </Button>
+        <Button tone="ghost" size="sm" block data-testid="side-apply" disabled={selected.length !== option.targets} onClick={() => void send(false)}>
+          {t.abilities[option.id].label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Ночная памятка: что значит выбор в общей панели и всё, что зависит от роли. */
+function NightBrief() {
+  const store = useStore();
+  const { game, nightChoice } = useRoomState();
+  const view = game?.view;
+  const name = useNames();
+  const options = view?.night?.options;
+  if (!view?.you?.alive || game?.stage !== 'night' || !options || !view.night) return null;
+  const alive = view.players.filter((p) => p.alive).map((p) => p.id);
+  const move = mainMove(options, nightChoice, alive, view.you.id);
+  const submitted = view.night.submitted;
+  const mine =
+    move.kind === 'vote'
+      ? submitted.mafiaVote !== undefined
+        ? `${t.game.night.mafiaVote}: ${submitted.mafiaVote ? name(submitted.mafiaVote) : t.game.night.abstain.toLowerCase()}`
+        : null
+      : submitted.ability !== undefined
+        ? submitted.ability
+          ? `${t.abilities[submitted.ability.id].label}: ${submitted.ability.targets.map(name).join(', ')}`
+          : t.game.night.skip
+        : null;
+  return (
+    <div className="space-y-2 rounded-2xl border border-gold-400/25 bg-gold-400/5 p-3" data-testid="night-brief">
+      <p className="text-xs font-bold tracking-[0.16em] text-gold-300 uppercase">{t.game.notebook.tonight}</p>
+      {move.kind === 'vote' ? <p className="text-sm">{t.game.notebook.voteMeaning}</p> : null}
+      {move.kind === 'plain' ? <p className="text-sm">{t.game.notebook.plainMeaning}</p> : null}
+      {move.kind === 'ability' ? (
+        <>
+          {options.abilities.length > 1 ? (
+            <Segmented<AbilityId>
+              label={t.game.night.yourMove}
+              value={move.option.id}
+              onChange={(id) => store.setNightChoice(id)}
+              options={options.abilities.map((o) => ({ value: o.id, label: t.abilities[o.id].label }))}
+            />
+          ) : null}
+          <p className="text-sm">
+            {t.game.notebook.abilityMeaning(t.abilities[move.option.id].prompt)}
+            {move.option.usesLeft !== null ? <span className="text-muted"> {t.game.night.usesLeft(move.option.usesLeft)}</span> : null}
+          </p>
+        </>
+      ) : null}
+      {mine ? <p className="text-sm text-ok">{t.game.notebook.yourMove(mine)}</p> : null}
+      {sideAbilities(options).map((option) => (
+        <SideAbility key={option.id} option={option} />
+      ))}
+      {move.kind === 'vote' && view.night.teamVotes ? <TeamVotes votes={view.night.teamVotes} /> : null}
+    </div>
+  );
+}
+
 /** Блокнот игрока: чат команды у чёрных, заметки у остальных. */
 export function Notebook({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const store = useStore();
@@ -120,7 +211,7 @@ export function Notebook({ onOpenChange }: { onOpenChange?: (open: boolean) => v
     const canWrite = night && Boolean(you?.alive);
     return (
       <Pad
-        header={night && game?.view.night?.teamVotes ? <TeamVotes votes={game.view.night.teamVotes} /> : null}
+        header={<NightBrief />}
         bubbles={chat.map((m) => ({ id: m.id, author: m.from === memberId ? null : m.name, text: m.text, mine: m.from === memberId }))}
         empty={t.game.notebook.empty}
         canWrite={canWrite}
@@ -130,6 +221,7 @@ export function Notebook({ onOpenChange }: { onOpenChange?: (open: boolean) => v
   }
   return (
     <Pad
+      header={<NightBrief />}
       bubbles={notes.map((n) => ({ id: n.id, author: null, text: n.text, mine: true }))}
       empty={t.game.notebook.empty}
       canWrite

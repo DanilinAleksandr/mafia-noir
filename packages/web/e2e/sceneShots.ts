@@ -26,7 +26,30 @@ for (const role of ['civilian', 'mafia', 'maniac', 'doctor'] as const) {
 }
 DECK.push({ file: 'deck-reduced-end', query: 'scene=roleReveal&role=detective&reduce=1&at=1' });
 
-for (const shot of DECK) {
+/** Утро: каждый случай — в трёх моментах (личная часть, общая часть, сводка); режимы показа — для сцен ролей. */
+const MORNING: Shot[] = [{ file: 'morning-wake', query: 'scene=nightReport&case=heal&t=0.55' }];
+const CASES = ['death-shot', 'death-knife', 'death-truck', 'death-piano', 'death-brick', 'death-poison', 'death-explosion', 'heal', 'guard', 'bless', 'block', 'link', 'silenced', 'dossier', 'newspaper', 'footprints', 'quiet', 'hobo', 'many'];
+const MOMENT: Record<string, [string, string, string]> = {
+  'death-shot': ['t=2.25', 't=3.3', 'at=1'],
+  'death-knife': ['t=2.1', 't=3.3', 'at=1'],
+  'death-truck': ['t=2.0', 't=2.4', 'at=1'],
+  'death-piano': ['t=1.95', 't=3.2', 'at=1'],
+  'death-brick': ['t=1.95', 't=3.2', 'at=1'],
+  'death-poison': ['t=2.4', 't=3.3', 'at=1'],
+  'death-explosion': ['t=1.95', 't=2.3', 'at=1'],
+};
+for (const c of CASES) {
+  const [a, b, end] = MOMENT[c] ?? ['t=2.7', 'at=0.8', 'at=1'];
+  MORNING.push({ file: `morning-${c}-1`, query: `scene=nightReport&case=${c}&${a}` });
+  MORNING.push({ file: `morning-${c}-2`, query: `scene=nightReport&case=${c}&${b}` });
+  MORNING.push({ file: `morning-${c}-3-end`, query: `scene=nightReport&case=${c}&${end}` });
+}
+for (const display of ['open', 'cinema'] as const) {
+  for (const c of ['heal', 'guard', 'block']) MORNING.push({ file: `morning-${c}-${display}`, query: `scene=nightReport&case=${c}&display=${display}&t=2.7` });
+}
+MORNING.push({ file: 'morning-death-shot-soft', query: 'scene=nightReport&case=death-shot&soft=1&t=3.3' });
+
+for (const shot of [...DECK, ...MORNING]) {
   test(`сцена: ${shot.file}`, async ({ page }) => {
     await page.goto(`/dev/scenes?${shot.query}&ui=0&sound=0`);
     await expect(page.locator('body[data-scene-ready="1"]')).toBeAttached({ timeout: 20_000 });

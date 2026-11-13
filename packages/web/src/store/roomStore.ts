@@ -5,7 +5,7 @@
  * журнал (история из `welcome` плюс события из каждого `game`), личные сцены и чат мафии.
  * Визуальные реакции на события идут через Presenter.
  */
-import type { Decision, NightAction, PlayerId, ViewEvent } from '@mafia/engine';
+import type { AbilityId, Decision, NightAction, PlayerId, ViewEvent } from '@mafia/engine';
 import type {
   ChatMessage,
   ClientMessage,
@@ -51,6 +51,10 @@ export interface RoomViewState {
   /** Сколько сообщений чата не прочитано (на экран не выводится: значок выдал бы мафию). */
   unreadChat: number;
   notes: Note[];
+  /** Выбранная способность ночи, если их несколько (зелья Ведьмы). Выбирается в «Блокноте». */
+  nightChoice: AbilityId | null;
+  /** Счётчик просьб открыть «Блокнот» (после ночного хода — у всех одинаково). */
+  notebookRequest: number;
 }
 
 /** Коды, при которых сессию нужно забыть: войти с ней снова не получится. */
@@ -86,6 +90,8 @@ export class RoomStore {
       presentation: null,
       unreadChat: 0,
       notes: loadNotes(code),
+      nightChoice: null,
+      notebookRequest: 0,
     };
     this.presenter = new Presenter((done) => this.onPresentationDone(done));
     this.presenter.subscribe(() => this.set({ presentation: this.presenter.current }));
@@ -317,6 +323,14 @@ export class RoomStore {
   }
   chat(text: string): Promise<Reply> {
     return this.send({ t: 'chat', text });
+  }
+
+  setNightChoice(choice: AbilityId | null): void {
+    this.set({ nightChoice: choice });
+  }
+
+  requestNotebook(): void {
+    this.set({ notebookRequest: this.state.notebookRequest + 1 });
   }
 
   addNote(text: string): void {

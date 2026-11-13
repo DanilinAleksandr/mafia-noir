@@ -36,7 +36,7 @@ function legacy(kind: PresentationKind): LazyExoticComponent<AnyScene> {
 
 export const SCENES: Record<PresentationKind, LazyExoticComponent<AnyScene>> = {
   roleReveal: lazy(() => import('./deck/DeckScene')) as unknown as LazyExoticComponent<AnyScene>,
-  nightReport: legacy('nightReport'),
+  nightReport: lazy(() => import('./morning/MorningScene')) as unknown as LazyExoticComponent<AnyScene>,
   verdict: legacy('verdict'),
   finale: legacy('finale'),
 };

@@ -5,7 +5,7 @@ import type { HostMode, ServerMessage, SettingsPatch } from '@mafia/protocol';
 import { seededRandom } from '../tools/bot';
 import { Client, Table } from './harness';
 import { allReady, playBots, playNight } from './play';
-import { Wiretap } from './wiretap';
+import { Wiretap, expectedScenes } from './wiretap';
 
 interface Scenario {
   name: string;
@@ -66,9 +66,16 @@ describe('Полная партия ботов с прослушкой всех 
     // ведущему разрешено видеть всё — и это тоже проверено; игрокам такие снимки не уходили
     if (scenario.hostMode === 'narrator') expect(tap.narratorMessages).toBeGreaterThan(20);
     else expect(tap.narratorMessages).toBe(0);
-    // в «Кино» игроки получали личные сцены, и каждая проверена
-    if (scenario.settings?.display === 'cinema') expect(tap.scenesChecked).toBeGreaterThan(3);
-    else expect(tap.scenesChecked).toBe(0);
+    // личные сцены (во всех режимах): проверено ровно столько, сколько положено всем игрокам
+    // по журналу партии. Раньше здесь было «больше трёх», и короткие партии (seed партии
+    // случаен) давали 2–3 сцены — тест падал примерно в 2% прогонов.
+    const final = result.state.game;
+    const display = scenario.settings?.display ?? 'stealth';
+    const expectedScenesTotal = (final?.players ?? []).reduce(
+      (sum, p) => sum + expectedScenes(final!, final!.log, p.id, display).length,
+      0,
+    );
+    expect(tap.scenesChecked).toBe(expectedScenesTotal);
     // боты доиграли сами: ни разу не пришлось нажимать «дальше» за хоста
     expect(result.forced).toBe(0);
     expect(result.state.stage).toBe('finished');
@@ -277,9 +284,12 @@ describe('Прослушка действительно ловит утечки'
     withComposition.game.composition = [{ role: 'mafia', count: 2 }];
     expect(problemsIn(ctx, ctx.spy, withComposition).some((p) => p.includes('состав партии показан не по режиму'))).toBe(true);
 
+    // в скрытном режиме сцена не называет роль и не бывает сценой проверки
     const withScenes = copy(ctx.last);
     withScenes.scenes = [{ id: 9, round: 1, ability: 'check', role: 'commissioner', saved: false }];
-    expect(problemsIn(ctx, ctx.spy, withScenes).some((p) => p.includes('сцены вне режима «Кино»'))).toBe(true);
+    const sceneProblems = problemsIn(ctx, ctx.spy, withScenes);
+    expect(sceneProblems.some((p) => p.includes('в скрытном режиме сцена называет роль'))).toBe(true);
+    expect(sceneProblems.some((p) => p.includes('не положена получателю'))).toBe(true);
 
     // настройки с ручным составом, показанные не хосту
     const hostRoom = [...ctx.table.host.inbox].reverse().find((m) => m.t === 'room') as ServerMessage;

@@ -94,6 +94,68 @@ const SYNTHS = {
   },
   /** Тихий тик буквы. */
   tick: { seconds: 0.05, synth: (c) => tone(c, 'square', 2200, 0, 0.001, 0.05, 0.025) },
+  /** Пробуждение: мягкий вдох. */
+  wake: { seconds: 1.2, synth: (c) => noise(c, 0, 1.1, 'lowpass', 300, 1400, 0.25, 0.5) },
+  /** Выстрел из-за кадра. */
+  shot: {
+    seconds: 0.8,
+    synth: (c) => {
+      noise(c, 0, 0.18, 'lowpass', 6000, 900, 0.9, 0.002);
+      tone(c, 'sine', 90, 0, 0.003, 0.8, 0.5, 40);
+    },
+  },
+  /** Глухой удар: карта на стол, нож в дерево. */
+  thud: { seconds: 0.4, synth: (c) => tone(c, 'sine', 120, 0, 0.004, 0.7, 0.3, 55) },
+  /** Грохот: рояль, КАМАЗ, кирпич. */
+  crash: {
+    seconds: 1.2,
+    synth: (c) => {
+      noise(c, 0, 1, 'lowpass', 3000, 300, 0.9, 0.005);
+      tone(c, 'sine', 70, 0, 0.005, 0.8, 0.8, 35);
+    },
+  },
+  /** Мотор грузовика. */
+  engine: { seconds: 1, synth: (c) => tone(c, 'sawtooth', 55, 0, 0.15, 0.25, 0.8, 80) },
+  /** Взрыв. */
+  explosion: {
+    seconds: 1.8,
+    synth: (c) => {
+      noise(c, 0, 1.6, 'lowpass', 2400, 120, 1, 0.005);
+      tone(c, 'sine', 60, 0, 0.01, 0.9, 1.4, 28);
+    },
+  },
+  /** Яд: шипение и бульканье. */
+  poison: {
+    seconds: 1.3,
+    synth: (c) => {
+      noise(c, 0, 1.2, 'bandpass', 2400, 1200, 0.25, 0.3, 4);
+      [0.1, 0.35, 0.6, 0.9].forEach((at) => tone(c, 'sine', 300, at, 0.01, 0.2, 0.1, 600));
+    },
+  },
+  /** Хлопок: пластырь, поцелуй. */
+  pop: { seconds: 0.2, synth: (c) => tone(c, 'sine', 700, 0, 0.002, 0.45, 0.1, 260) },
+  /** Штамп. */
+  stamp: {
+    seconds: 0.4,
+    synth: (c) => {
+      tone(c, 'sine', 160, 0, 0.002, 0.8, 0.22, 70);
+      noise(c, 0, 0.06, 'highpass', 2500, 1500, 0.4, 0.002);
+    },
+  },
+  /** Лента. */
+  tape: { seconds: 0.3, synth: (c) => noise(c, 0, 0.25, 'bandpass', 1200, 3200, 0.4, 0.01, 2) },
+  /** Шелест бумаги. */
+  paper: { seconds: 0.5, synth: (c) => noise(c, 0, 0.45, 'highpass', 1800, 4200, 0.3, 0.05) },
+  /** Искры благословения. */
+  sparkle: {
+    seconds: 1.4,
+    synth: (c) => [1318.5, 1760, 2093, 2637].forEach((f, i) => tone(c, 'sine', f, i * 0.08, 0.01, 0.12, 1)),
+  },
+  /** Рассвет: тёплый аккорд. */
+  dawn: {
+    seconds: 2.4,
+    synth: (c) => [261.63, 329.63, 392, 523.25].forEach((f, i) => tone(c, 'triangle', f, i * 0.12, 0.6, 0.09, 1.6)),
+  },
 } satisfies Record<string, { seconds: number; synth: Synth }>;
 
 export type SoundId = keyof typeof SYNTHS;

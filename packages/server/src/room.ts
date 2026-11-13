@@ -881,11 +881,11 @@ export class Room extends DurableObject<Env> {
     return { ...common, view };
   }
 
-  /** Личные сцены участника — только в режиме «Кино» и только игрокам. */
+  /** Личные сцены участника — во всех режимах (в «Скрытном» без ролей), только игрокам. */
   private scenesFor(memberId: MemberId, events: readonly GameEvent[]): ReturnType<typeof personalScenes> {
     const room = this.room as RoomState;
-    if (room.settings.display !== 'cinema' || !room.game || !room.players.includes(memberId)) return [];
-    return personalScenes(room.game, events, memberId);
+    if (!room.game || !room.players.includes(memberId)) return [];
+    return personalScenes(room.game, events, memberId, room.settings.display);
   }
 
   // ───────────────────────────── запись и рассылка ─────────────────────────────

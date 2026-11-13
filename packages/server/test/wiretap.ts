@@ -19,7 +19,7 @@
  */
 import { ROLE_IDS, currentDecision, projectEvent, projectEvents, viewFor } from '@mafia/engine';
 import type { GameEvent, GameState, PlayerId, ViewEvent } from '@mafia/engine';
-import type { GameSnapshot, Scene, ServerMessage } from '@mafia/protocol';
+import type { DisplayMode, GameSnapshot, Scene, ServerMessage } from '@mafia/protocol';
 import { allowedToKnow } from '../../engine/test/helpers';
 import { compositionOf } from '../src/game-view';
 import type { RoomState } from '../src/state';
@@ -39,7 +39,15 @@ const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.str
  * Какие личные сцены положены игроку по этим событиям. Написано независимо от сервера:
  * сцена — это применённая к игроку способность (не нападение), роль её автора и признак спасения.
  */
-export function expectedScenes(game: GameState, events: readonly GameEvent[], playerId: PlayerId): Scene[] {
+/** В «Скрытном» режиме эти действия сценами не становятся (выдали бы информационные роли). */
+const STEALTH_HIDDEN = ['check', 'investigate', 'scout', 'compare', 'stay'];
+
+export function expectedScenes(
+  game: GameState,
+  events: readonly GameEvent[],
+  playerId: PlayerId,
+  display: DisplayMode = 'cinema',
+): Scene[] {
   const scenes: Scene[] = [];
   for (const event of events) {
     if (event.type !== 'abilityUsed') continue;
@@ -47,10 +55,11 @@ export function expectedScenes(game: GameState, events: readonly GameEvent[], pl
     const actor = game.players.find((p) => p.id === event.actors[0]);
     if (!actor || actor.id === playerId || !event.targets.includes(playerId)) continue;
     if (ATTACKS.includes(ability) || NOT_VISITS.includes(ability)) continue;
+    if (display === 'stealth' && STEALTH_HIDDEN.includes(ability)) continue;
     const saved = game.log.some(
       (e) => e.type === 'saved' && e.round === event.round && e.actors[0] === actor.id && e.targets[0] === playerId,
     );
-    scenes.push({ id: event.id, round: event.round, ability, role: actor.role, saved });
+    scenes.push({ id: event.id, round: event.round, ability, role: display === 'stealth' ? null : actor.role, saved });
   }
   return scenes;
 }
@@ -62,7 +71,7 @@ export class Wiretap {
   checked = 0;
   /** Сколько из них — снимки для ведущего-наблюдателя (ему разрешено видеть всё). */
   narratorMessages = 0;
-  /** Сколько личных сцен «Кино» проверено. */
+  /** Сколько личных сцен проверено. */
   scenesChecked = 0;
   private readonly table: Table;
   private readonly cursor = new Map<Client, number>();
@@ -175,12 +184,10 @@ export class Wiretap {
       }
     }
 
-    // 6. личные сцены «Кино»
-    if (scenes.length > 0) {
-      if (display !== 'cinema') report('сцены вне режима «Кино»');
-      if (viewer === null) report('сцены пришли не игроку');
-    }
-    const mine = viewer === null ? [] : expectedScenes(game, game.log, viewer);
+    // 6. личные сцены (во всех режимах; в «Скрытном» — без ролей)
+    if (scenes.length > 0 && viewer === null) report('сцены пришли не игроку');
+    if (display === 'stealth' && scenes.some((s) => s.role !== null)) report('в скрытном режиме сцена называет роль');
+    const mine = viewer === null ? [] : expectedScenes(game, game.log, viewer, display);
     for (const scene of scenes) {
       this.scenesChecked++;
       const keys = Object.keys(scene).sort().join(',');
@@ -188,11 +195,11 @@ export class Wiretap {
       if (ATTACKS.includes(scene.ability)) report(`сцена раскрывает нападавшего: ${scene.ability}`);
       if (!mine.some((expected) => same(expected, scene))) report(`сцена №${scene.id} не положена получателю или искажена`);
     }
-    if (display === 'cinema' && viewer !== null && fresh) {
+    if (viewer !== null && fresh) {
       if (message.t === 'welcome') {
         if (!same(scenes, mine)) report('сцены при входе отличаются от положенных');
       } else if (message.t === 'game' && oneStep) {
-        if (!same(scenes, expectedScenes(game, game.log.slice(this.logLength), viewer))) {
+        if (!same(scenes, expectedScenes(game, game.log.slice(this.logLength), viewer, display))) {
           report('сцены шага отличаются от положенных');
         }
       }

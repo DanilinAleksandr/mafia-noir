@@ -15,6 +15,9 @@ import type { GameState, PlayerId, RoleId } from '@mafia/engine';
 import type { ClientView, Scene } from '@mafia/protocol';
 import { digest, lastPhaseMarker, scenesOfRound, segment } from '../presenter/digest';
 import type { Presentation, PresentationKind } from '../presenter/presenter';
+import type { DisplayMode } from '@mafia/protocol';
+import type { Beat, Report } from '../presenter/digest';
+import { DEATH_STYLES, type DeathStyle, deathStyle } from '../scenes/morning/plan';
 
 export const LAB_NAMES = ['Аня', 'Борис', 'Вера', 'Гоша', 'Даша', 'Егор', 'Жора'];
 
@@ -101,4 +104,97 @@ export function labCase(kind: PresentationKind, role: RoleId, cinema: boolean): 
     presentation: { id: 4, kind: 'finale', result: s.result ?? { outcome: 'red', reason: 'threatsEliminated', winners: [] } },
     view: view(s, me),
   };
+}
+
+// ───────────────────────────── утро: готовые случаи ─────────────────────────────
+
+
+export const MORNING_CASES = [
+  ...DEATH_STYLES.map((s) => `death-${s}`),
+  'heal',
+  'guard',
+  'bless',
+  'block',
+  'link',
+  'silenced',
+  'dossier',
+  'newspaper',
+  'footprints',
+  'quiet',
+  'hobo',
+  'many',
+] as const;
+export type MorningCase = (typeof MORNING_CASES)[number];
+
+export const MORNING_TITLES: Record<MorningCase, string> = {
+  'death-shot': 'Смерть: выстрел',
+  'death-knife': 'Смерть: нож',
+  'death-truck': 'Смерть: КАМАЗ',
+  'death-piano': 'Смерть: рояль',
+  'death-brick': 'Смерть: кирпич',
+  'death-poison': 'Смерть: яд',
+  'death-explosion': 'Смерть: взрыв',
+  heal: 'Спасли (лечение)',
+  guard: 'Защитили (охрана)',
+  bless: 'Благословили',
+  block: 'Заблокировали',
+  link: 'Купидон',
+  silenced: 'Молчание',
+  dossier: 'Досье (проверка)',
+  newspaper: 'Газета Журналиста',
+  footprints: 'Следы (Патрульный)',
+  quiet: 'Спокойное утро',
+  hobo: 'Бомж с хозяином',
+  many: 'Несколько погибших',
+};
+
+/** Раунд, при котором игроку выпадает нужный вид смерти (вид — от игрока и круга). */
+function roundFor(player: string, style: DeathStyle): number {
+  for (let r = 1; r < 200; r++) if (deathStyle(player, r) === style) return r;
+  return 1;
+}
+
+/**
+ * Итоги ночи для витрины. В «Скрытном» сцены без ролей — как присылает сервер.
+ */
+export function labMorning(kind: MorningCase, role: RoleId, display: DisplayMode): LabCase {
+  const me = 'm1';
+  const s0 = start(role);
+  const scene = (ability: Scene['ability'], sceneRole: RoleId, saved = false): Beat => ({
+    kind: 'scene',
+    scene: { id: 90, round: 1, ability, role: display === 'stealth' ? null : sceneRole, saved },
+  });
+  const pub: Beat[] = [];
+  const priv: Beat[] = [];
+  let round = 1;
+  if (kind.startsWith('death-')) {
+    const style = kind.slice(6) as DeathStyle;
+    round = roundFor(me, style);
+    pub.push({ kind: 'death', player: me, cause: 'mafiaKill', role, by: [] });
+  }
+  if (kind === 'heal') {
+    priv.push(scene('heal', 'doctor', true));
+    pub.push({ kind: 'quietNight' }, { kind: 'saved', target: null, by: null, mine: false });
+  }
+  if (kind === 'guard') priv.push(scene('guard', 'bodyguard', true));
+  if (kind === 'bless') priv.push(scene('bless', 'priest'));
+  if (kind === 'block') priv.push(scene('block', 'mistress'), { kind: 'blockedMe' });
+  if (kind === 'link') priv.push(scene('link', 'cupid'), { kind: 'lovers', targets: ['m1', 'm4'] });
+  if (kind === 'silenced') pub.push({ kind: 'silenced', player: me });
+  if (kind === 'dossier') priv.push({ kind: 'checked', target: 'm2', isMafia: true });
+  if (kind === 'newspaper') priv.push({ kind: 'compared', targets: ['m3', 'm5'], sameTeam: false });
+  if (kind === 'footprints') priv.push({ kind: 'visitors', target: 'm4', visitors: ['m2', 'm6'] });
+  if (kind === 'hobo') {
+    pub.push({ kind: 'death', player: 'm4', cause: 'mafiaKill', role: 'doctor', by: [] });
+    pub.push({ kind: 'death', player: 'm5', cause: 'hoboWithHost', role: 'hobo', by: [] });
+  }
+  if (kind === 'many') {
+    pub.push({ kind: 'death', player: 'm3', cause: 'mafiaKill', role: 'commissioner', by: [] });
+    pub.push({ kind: 'death', player: 'm6', cause: 'maniacKill', role: 'civilian', by: [] });
+    pub.push({ kind: 'silenced', player: 'm4' });
+    priv.push(scene('heal', 'doctor', false));
+  }
+  if (!pub.some((b) => b.kind === 'death') && !pub.some((b) => b.kind === 'quietNight')) pub.unshift({ kind: 'quietNight' });
+  const report: Report = { public: pub, private: priv };
+  return { presentation: { id: 5, kind: 'nightReport', round, step: 2, report }, view: view(s0, me) };
 }

@@ -148,7 +148,7 @@ describe('Утро: синхронизация перед днём', () => {
   it('после ночи голоса не принимаются, пока клиенты не готовы', async () => {
     const table = await toMorning();
     const game = table.host.game;
-    expectDeadline(game, 15_000);
+    expectDeadline(game, 25_000);
     expect(game?.progress).toEqual({ done: 0, total: 5 });
     expect(game?.view.phase).toBe('day');
     expect(await table.host.request({ t: 'vote', target: 'm2' })).toMatchObject({ ok: false, code: 'WRONG_STAGE' });
@@ -184,10 +184,10 @@ describe('Утро: синхронизация перед днём', () => {
     await table.closeAll();
   });
 
-  it('по таймауту 15 секунд день начинается сам', async () => {
+  it('по таймауту 25 секунд день начинается сам', async () => {
     const table = await toMorning();
     await table.host.ok({ t: 'ready', step: table.host.game?.step ?? -1 });
-    await table.tick(14_000);
+    await table.tick(24_000);
     expect(table.host.game?.stage).toBe('morning');
     await table.tick(1_500);
     expect(table.host.game?.stage).toBe('discussion');
@@ -528,14 +528,23 @@ describe('Режимы показа событий', () => {
     });
   }
 
-  it('«Скрытный»: ни состава, ни сцен', async () => {
+  it('«Скрытный»: состава нет, личные сцены — без ролей и без проверок', async () => {
     const table = await tableWith(SET);
     await table.start();
+    const mafia = await table.seat('mafia');
+    const victim = await table.seat('civilian', 0);
     await eventfulNight(table);
     for (const client of table.clients) {
       expect(client.game?.display).toBe('stealth');
       expect(client.game?.composition).toBeNull();
-      expect(client.scenes).toEqual([]);
+    }
+    // мирного вылечили — он знает только это: ни роли лекаря, ни кто это был
+    expect(victim.client.scenes).toMatchObject([{ round: 1, ability: 'heal', role: null, saved: true }]);
+    // проверка Комиссара в скрытном режиме сценой не становится: она выдала бы роль
+    expect(mafia.client.scenes).toEqual([]);
+    for (const client of table.clients) {
+      if (client !== victim.client) expect(client.scenes).toEqual([]);
+      expect(JSON.stringify(client.scenes)).not.toMatch(/doctor|commissioner/);
     }
     await table.closeAll();
   });
@@ -551,8 +560,12 @@ describe('Режимы показа событий', () => {
         { role: 'civilian', count: 2 },
         { role: 'mafia', count: 1 },
       ]);
-      expect(client.scenes).toEqual([]);
     }
+    // личные сцены — с ролью подействовавшего, как и в «Кино»
+    const victim = await table.seat('civilian', 0);
+    const mafia = await table.seat('mafia');
+    expect(victim.client.scenes).toMatchObject([{ round: 1, ability: 'heal', role: 'doctor', saved: true }]);
+    expect(mafia.client.scenes).toMatchObject([{ round: 1, ability: 'check', role: 'commissioner', saved: false }]);
     // владельцы по-прежнему скрыты
     const civilian = await table.seat('civilian', 1);
     expect(civilian.client.game?.view.players.filter((p) => p.role !== null)).toHaveLength(1);
@@ -644,7 +657,7 @@ describe('Вечер: синхронизация после приговора',
   it('после казни ночь не начинается, пока клиенты не готовы', async () => {
     const table = await toEvening();
     const game = table.host.game;
-    expectDeadline(game, 15_000);
+    expectDeadline(game, 25_000);
     expect(game?.progress).toEqual({ done: 0, total: 5 });
     // движок уже в ночи второго круга, но ходы сервер не принимает
     expect(game?.view.phase).toBe('night');
@@ -673,9 +686,9 @@ describe('Вечер: синхронизация после приговора',
     await table.closeAll();
   });
 
-  it('по таймауту 15 секунд ночь начинается сама', async () => {
+  it('по таймауту 25 секунд ночь начинается сама', async () => {
     const table = await toEvening();
-    await table.tick(14_000);
+    await table.tick(24_000);
     expect(table.host.game?.stage).toBe('evening');
     await table.tick(1_500);
     expect(table.host.game?.stage).toBe('night');

@@ -4,7 +4,7 @@
  */
 import type { GameStage } from '@mafia/protocol';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Countdown } from '../../components/Countdown';
 import { HoldToReveal } from '../../components/HoldToReveal';
 import { Journal } from '../../components/Journal';
@@ -57,6 +57,19 @@ function PlayerGame() {
   const [sheet, setSheet] = useState<'role' | 'journal' | 'roles' | 'chat' | 'host' | 'prefs' | null>(null);
   const [confirmNode, confirm] = useConfirm();
   const setChatOpen = useCallback((open: boolean) => store.setChatOpen(open), [store]);
+  // после ночного хода «Блокнот» открывается у всех одинаково
+  const notebookRequest = state.notebookRequest;
+  // (только пока идёт ночь и нет сцены: последний ход разрешает ночь, и утро может прийти раньше ответа)
+  const canOpenNotebook = game.stage === 'night' && state.presentation === null;
+  useEffect(() => {
+    if (notebookRequest > 0 && canOpenNotebook) setSheet('chat');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notebookRequest]);
+  // началась сцена — открытые листы закрываются, чтобы не перекрывать её
+  const presentationId = state.presentation?.id ?? null;
+  useEffect(() => {
+    if (presentationId !== null) setSheet(null);
+  }, [presentationId]);
 
   const teammates = view.players.filter((p) => p.team === 'black' && p.id !== you?.id && you?.team === 'black');
 

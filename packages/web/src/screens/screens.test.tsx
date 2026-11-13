@@ -1,7 +1,9 @@
 /**
  * Компонентные тесты ключевых экранов. Состояние партии строит настоящий движок.
  */
-import { castVote, resolveVote, submitNightAction } from '@mafia/engine';
+import { ROLE_IDS, castVote, resolveVote, submitNightAction } from '@mafia/engine';
+import { t } from '../i18n';
+import { Notebook } from './game/MafiaChat';
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -119,30 +121,61 @@ describe('Ночь', () => {
     const store = storeWith({ memberId: 'm2', room: room(5, 'm1', { stage: 'game' }), game: snapshot(state, 'm2', 'night') });
     const night = vi.spyOn(store, 'night').mockResolvedValue(OK);
     renderWith(store, <NightPanel />);
-    expect(screen.getByText('Кого проверить этой ночью?')).toBeInTheDocument();
+    // подсказка та же, что у всех; смысл хода — только в «Блокноте»
+    expect(screen.getByText('Выберите игрока')).toBeInTheDocument();
+    expect(screen.queryByText('Кого проверить этой ночью?')).toBeNull();
     await userEvent.click(screen.getByRole('option', { name: 'Аня' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сделать ход' }));
     expect(night).toHaveBeenCalledWith({ kind: 'ability', ability: 'check', targets: ['m1'] });
   });
 
-  it('мафия голосует за жертву; своих выбрать нельзя', async () => {
+  it('мафия голосует за жертву; своих выбрать нельзя, но и не видно, что нельзя', async () => {
     const store = storeWith({ memberId: 'm1', room: room(5, 'm1', { stage: 'game' }), game: snapshot(state, 'm1', 'night') });
     const night = vi.spyOn(store, 'night').mockResolvedValue(OK);
     renderWith(store, <NightPanel />);
-    expect(screen.getByRole('option', { name: 'Аня' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText('Выберите игрока')).toBeInTheDocument();
+    expect(screen.queryByText('Кто станет жертвой?')).toBeNull();
+    expect(screen.getByRole('option', { name: 'Аня' })).not.toHaveAttribute('aria-disabled');
+    await userEvent.click(screen.getByRole('option', { name: 'Аня' }));
+    expect(screen.getByRole('option', { name: 'Аня' })).toHaveAttribute('aria-selected', 'false');
     await userEvent.click(screen.getByRole('option', { name: 'Даша' }));
     await userEvent.click(screen.getByRole('button', { name: 'Сделать ход' }));
     expect(night).toHaveBeenCalledWith({ kind: 'mafiaVote', target: 'm5' });
   });
 
-  it('сделанный ход скрыт, пока не нажать «показать»', async () => {
+  it('сделанный ход на панели не раскрывается — он виден только в «Блокноте»', () => {
     const moved = submitNightAction(state, 'm2', { kind: 'ability', ability: 'check', targets: ['m1'] }).state;
     const store = storeWith({ memberId: 'm2', room: room(5, 'm1', { stage: 'game' }), game: snapshot(moved, 'm2', 'night') });
-    renderWith(store, <NightPanel />);
+    const { unmount } = renderWith(store, <NightPanel />);
     expect(screen.getByTestId('move-done')).toBeInTheDocument();
     expect(screen.queryByText(/Проверить: Аня/)).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: 'Показать ход' }));
-    expect(screen.getByText('Проверить: Аня')).toBeInTheDocument();
+    unmount();
+    renderWith(store, <Notebook />);
+    expect(screen.getByTestId('night-brief')).toHaveTextContent('Ваш ход: Проверить: Аня');
+    expect(screen.getByTestId('night-brief')).toHaveTextContent('кого проверить этой ночью?');
+  });
+
+  it('ночная панель одинакова у всех 25 ролей — по тексту и по разметке', () => {
+    // разметка без атрибутов: тег, классы и собственный текст каждого элемента
+    const skeleton = (root: Element): string => {
+      const own = Array.from(root.childNodes)
+        .filter((n) => n.nodeType === Node.TEXT_NODE)
+        .map((n) => n.textContent)
+        .join('');
+      return `<${root.tagName} ${root.getAttribute('class') ?? ''}>${own}${Array.from(root.children).map(skeleton).join('')}</${root.tagName}>`;
+    };
+    const seen = new Map<string, string[]>();
+    for (const role of ROLE_IDS) {
+      const others = ['mafia', 'commissioner', 'doctor', 'civilian', 'civilian'] as const;
+      const game = newGame([role, ...others]);
+      const store = storeWith({ memberId: 'm1', room: room(6, 'm1', { stage: 'game' }), game: snapshot(game, 'm1', 'night') });
+      const { container, unmount } = renderWith(store, <NightPanel />);
+      const key = skeleton(container);
+      seen.set(key, [...(seen.get(key) ?? []), role]);
+      expect(container.textContent).not.toContain(t.roles[role].name);
+      unmount();
+    }
+    expect([...seen.values()]).toEqual([[...ROLE_IDS]]);
   });
 
   it('выбывший видит «город спит» без выбора', () => {

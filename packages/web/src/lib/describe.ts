@@ -180,6 +180,12 @@ export function describeBeat(beat: Beat, name: NameOf): Line | null {
     case 'blessedBy':
       return { text: `${name(beat.target)} под вашим благословением на завтра.`, tone: 'private' };
     case 'scene': {
+      if (beat.scene.role === null) {
+        // «Скрытный»: только сам факт, без роли
+        const anon = t.game.scenesAnon as Record<string, ((saved: boolean) => string) | undefined>;
+        const fn = anon[beat.scene.ability] ?? t.game.scenesAnon.generic;
+        return { text: fn(beat.scene.saved), tone: beat.scene.saved ? 'save' : 'private' };
+      }
       const role = roleName(beat.scene.role);
       const scenes = t.game.scenes as Record<string, ((role: string, saved: boolean) => string) | undefined>;
       const fn = scenes[beat.scene.ability] ?? t.game.scenes.generic;

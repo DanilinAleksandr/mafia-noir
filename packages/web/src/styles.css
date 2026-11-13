@@ -13,6 +13,8 @@
 @theme {
   --font-display: 'Playfair Display', 'Georgia', serif;
   --font-sans: 'Manrope Variable', 'Segoe UI', system-ui, sans-serif;
+  /* рукописный меловой — названия ролей на карточках */
+  --font-hand: 'Amatic SC', 'Segoe Print', cursive;
 
   /* основа */
   --color-ink: #09080b;

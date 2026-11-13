@@ -17,7 +17,7 @@ import { sceneClock } from '../scenes/clock';
 import { SCENES, SCENE_TITLES } from '../scenes/registry';
 import { SceneStage } from '../scenes/SceneStage';
 import { quality, setPrefs, usePrefs } from '../settings/prefs';
-import { LAB_NAMES, labCase } from './labData';
+import { LAB_NAMES, MORNING_CASES, MORNING_TITLES, type MorningCase, labCase, labMorning } from './labData';
 
 const KINDS = Object.keys(SCENE_TITLES) as PresentationKind[];
 const SPEEDS = [1, 0.5, 0.25];
@@ -50,6 +50,9 @@ export default function ScenesLab() {
     return isRoleId(r) ? r : 'mafia';
   });
   const [display, setDisplay] = useState<DisplayMode>(() => (['stealth', 'open', 'cinema'].includes(params.get('display') ?? '') ? (params.get('display') as DisplayMode) : 'stealth'));
+  const [mcase, setMcase] = useState<MorningCase>(() =>
+    MORNING_CASES.includes(params.get('case') as MorningCase) ? (params.get('case') as MorningCase) : 'death-shot',
+  );
   const [run, setRun] = useState(0);
   const [done, setDone] = useState(false);
   const [ui, setUi] = useState(params.get('ui') !== '0');
@@ -90,7 +93,10 @@ export default function ScenesLab() {
     return off;
   }, [params, run]);
 
-  const data = useMemo(() => labCase(kind, role, display === 'cinema'), [kind, role, display]);
+  const data = useMemo(
+    () => (kind === 'nightReport' ? labMorning(mcase, role, display) : labCase(kind, role, display === 'cinema')),
+    [kind, role, display, mcase],
+  );
   const Scene = SCENES[kind];
   const name = (id: string) => LAB_NAMES[Number(id.slice(1)) - 1] ?? id;
   const restart = () => {
@@ -104,7 +110,7 @@ export default function ScenesLab() {
         <SceneStage hostSkip={null}>
           <Suspense fallback={<div className="fixed inset-0 bg-ink" />}>
             <Scene
-              key={`${kind}-${role}-${display}-${run}-${prefs.reduceMotion}`}
+              key={`${kind}-${role}-${display}-${mcase}-${run}-${prefs.reduceMotion}-${prefs.softEffects}`}
               presentation={data.presentation}
               view={data.view}
               name={name}
@@ -129,6 +135,11 @@ export default function ScenesLab() {
             <select value={role} onChange={(e) => { setRole(e.target.value as RoleId); restart(); }} className="rounded bg-ash px-2 py-1">
               {ROLE_IDS.map((r) => <option key={r} value={r}>{roleName(r)}</option>)}
             </select>
+            {kind === 'nightReport' ? (
+              <select value={mcase} onChange={(e) => { setMcase(e.target.value as MorningCase); restart(); }} className="rounded bg-ash px-2 py-1">
+                {MORNING_CASES.map((c) => <option key={c} value={c}>{MORNING_TITLES[c]}</option>)}
+              </select>
+            ) : null}
             <select value={display} onChange={(e) => { setDisplay(e.target.value as DisplayMode); restart(); }} className="rounded bg-ash px-2 py-1">
               <option value="stealth">Скрытный</option>
               <option value="open">Открытый состав</option>
