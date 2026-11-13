@@ -22,7 +22,7 @@ import type {
 import type { ErrorCode } from './errors';
 
 /** Версия протокола. Меняется при несовместимых изменениях сообщений. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Участник комнаты. В игре его id совпадает с id игрока в движке. */
 export type MemberId = PlayerId;
@@ -45,6 +45,9 @@ export type DisplayMode = 'stealth' | 'open' | 'cinema';
 /** Таймеры фаз в секундах; null — таймер выключен. */
 export interface TimerSettings {
   night: number | null;
+  /** Обсуждение днём: по истечении сразу начинается голосование. */
+  discussion: number | null;
+  /** Голосование. */
   day: number | null;
   decision: number | null;
 }
@@ -109,11 +112,12 @@ export interface RoomSnapshot {
  * - night — принимаются ночные ходы;
  * - decision — игра ждёт решения одного игрока (чьего — видит только он);
  * - morning — ночь разрешена, клиенты показывают итоги и шлют `ready`;
- * - day — принимаются голоса;
+ * - discussion — обсуждение: голоса ещё не принимаются; голосование начинает хост или таймер;
+ * - day — голосование: принимаются голоса;
  * - evening — день закончен, клиенты показывают приговор и шлют `ready`;
  * - ended — партия окончена.
  */
-export type GameStage = 'night' | 'decision' | 'morning' | 'day' | 'evening' | 'ended';
+export type GameStage = 'night' | 'decision' | 'morning' | 'discussion' | 'day' | 'evening' | 'ended';
 
 /** Представление игрока без журнала: журнал приходит отдельно, порциями. */
 export type ClientView = Omit<PlayerView, 'events'>;

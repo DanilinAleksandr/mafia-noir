@@ -6,7 +6,7 @@ import { nightMoveDone } from '@mafia/engine';
 import type { NightAction, PlayerState } from '@mafia/engine';
 import type { RoomState } from '../src/state';
 import { type BotMemory, botMove, newBotMemory, seededRandom } from '../tools/bot';
-import type { Client, Table } from './harness';
+import { type Client, type Table, resetRateLimit } from './harness';
 
 export interface PlayOptions {
   seed: number;
@@ -46,9 +46,14 @@ export async function playBots(table: Table, options: PlayOptions): Promise<Play
         mem = newBotMemory();
         memory.set(client, mem);
       }
-      const move = botMove(client.game, mem, random);
+      const move = botMove(client.game, mem, random, { isHost: client.room?.hostId === client.memberId });
       if (!move) continue;
-      const reply = await client.request(move);
+      let reply = await client.request(move);
+      if (!reply.ok && reply.code === 'RATE_LIMITED') {
+        // бот ходит быстрее человека: окно ограничения «перематываем» и повторяем ход
+        await resetRateLimit(table.code);
+        reply = await client.request(move);
+      }
       // «уже неактуально» — нормальная гонка, остальное — ошибка сценария
       if (!reply.ok && reply.code !== 'STALE' && reply.code !== 'WRONG_STAGE') {
         throw new Error(`Бот ${client.memberId} получил отказ на ${JSON.stringify(move)}: ${reply.code} ${reply.message}`);
@@ -105,9 +110,23 @@ export async function playNight(
   await table.settle();
 }
 
-/** Все онлайн-клиенты сообщают «готов» — день начинается. */
-export async function allReady(table: Table): Promise<void> {
+/**
+ * Все онлайн-клиенты сообщают «готов». Если после этого начался день, хост сразу открывает
+ * голосование (если не попросили остаться на обсуждении).
+ */
+export async function allReady(table: Table, options: { keepDiscussion?: boolean } = {}): Promise<void> {
   const state = await table.settle();
   for (const client of table.open) await client.request({ t: 'ready', step: state.step });
+  await table.settle();
+  if (!options.keepDiscussion) await startVoting(table);
+}
+
+/** Хост открывает голосование, если идёт обсуждение. */
+export async function startVoting(table: Table): Promise<void> {
+  const state = await table.settle();
+  if (state.stage !== 'game' || !state.discussion || state.sync) return;
+  const host = table.open.find((c) => c.memberId === state.hostId);
+  if (!host) throw new Error('Хоста нет в сети: голосование открыть некому');
+  await host.ok({ t: 'advance', step: state.step });
   await table.settle();
 }

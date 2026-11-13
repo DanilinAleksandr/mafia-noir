@@ -47,7 +47,7 @@ export interface Attempts {
 }
 
 /** Версия формата состояния комнаты. Комнаты другого формата считаются несуществующими. */
-export const ROOM_STATE_VERSION = 2;
+export const ROOM_STATE_VERSION = 3;
 
 export interface RoomState {
   v: typeof ROOM_STATE_VERSION;
@@ -76,6 +76,8 @@ export interface RoomState {
    * Кто уже готов и когда игра пойдёт дальше сама. null — синхронизации нет.
    */
   sync: { kind: 'morning' | 'evening'; ready: MemberId[]; deadline: number } | null;
+  /** Идёт дневное обсуждение: голоса ещё не принимаются (стадия `discussion`). */
+  discussion: boolean;
   /** Когда текущая стадия закончится по таймеру; null — таймера нет. */
   stageDeadline: number | null;
   chat: ChatMessage[];

@@ -188,7 +188,8 @@ const STAGE_NAMES: Record<string, string> = {
   night: 'Ночь',
   decision: 'Решение',
   morning: 'Утро',
-  day: 'День',
+  discussion: 'Обсуждение',
+  day: 'Голосование',
   evening: 'Вечер',
   ended: 'Конец',
 };
@@ -206,6 +207,8 @@ function describeMove(move: ClientMessage, name: (id: string | null) => string):
       return `решение ${move.decision.kind}: ${name(move.decision.target)}`;
     case 'ready':
       return 'готов';
+    case 'advance':
+      return 'начать голосование';
     case 'chat':
       return `чат мафии: «${move.text}»`;
     default:
@@ -294,7 +297,7 @@ async function playGame(base: string, options: Options, gameIndex: number): Prom
     let acted = false;
     for (const bot of bots) {
       if (!bot.game || bot.game.stage === 'ended') continue;
-      const move = botMove(bot.game, bot.memory, random);
+      const move = botMove(bot.game, bot.memory, random, { isHost: bot.memberId === bot.room?.hostId });
       if (!move) continue;
       log(`      ${bot.name} → ${describeMove(move, nameOf)}`);
       await send(bot, move);
@@ -356,7 +359,8 @@ async function joinRoom(base: string, options: Options): Promise<void> {
     try {
       for (;;) {
         if (bot.closed || !bot.game || bot.game.stage === 'ended') return;
-        const move = botMove(bot.game, bot.memory, random);
+        // в чужой комнате голосование открывает хост-человек, но если права перешли к боту — открывает он
+        const move = botMove(bot.game, bot.memory, random, { isHost: bot.memberId === bot.room?.hostId });
         if (!move) return;
         // небольшая пауза, чтобы за ходами можно было следить
         await new Promise((resolve) => setTimeout(resolve, 400 + Math.floor(random() * 600)));

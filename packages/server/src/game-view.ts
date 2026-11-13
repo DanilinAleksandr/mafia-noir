@@ -7,11 +7,12 @@ import type { GameStage, RoleCount, Scene } from '@mafia/protocol';
 import type { RoomState } from './state';
 
 /** Стадия партии с точки зрения сервера. */
-export function stageOf(room: Pick<RoomState, 'game' | 'sync'>): GameStage {
+export function stageOf(room: Pick<RoomState, 'game' | 'sync' | 'discussion'>): GameStage {
   const game = room.game as GameState;
   if (game.phase === 'ended') return 'ended';
   if (game.pending.length > 0) return 'decision';
   if (room.sync) return room.sync.kind;
+  if (game.phase === 'day' && room.discussion) return 'discussion';
   return game.phase;
 }
 

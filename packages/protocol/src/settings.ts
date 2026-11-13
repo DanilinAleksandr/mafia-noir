@@ -49,13 +49,13 @@ const ENUM_RULES = {
   votingMode: ['secret', 'revealAfter', 'open'],
 } as const satisfies Partial<Record<keyof Rules, readonly string[]>>;
 
-const TIMER_KEYS = ['night', 'day', 'decision'] as const satisfies readonly (keyof TimerSettings)[];
+const TIMER_KEYS = ['night', 'discussion', 'day', 'decision'] as const satisfies readonly (keyof TimerSettings)[];
 
 export function defaultRoomSettings(hostMode: HostMode = 'player'): RoomSettings {
   return {
     hostMode,
     display: 'stealth',
-    timers: { night: null, day: null, decision: null },
+    timers: { night: null, discussion: null, day: null, decision: null },
     rules: { ...DEFAULT_RULES },
     composition: { roles: {}, quotas: {}, preset: null, minCiviliansShare: null },
   };

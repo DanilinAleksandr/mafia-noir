@@ -1,0 +1,162 @@
+/*
+ * Дизайн-система «Мафии» — в одном месте.
+ *
+ * Нуар: почти чёрный фон, золото и бордо. Цвета команд: красные — алые, чёрные — чёрно-золотые,
+ * нейтральные — серебристо-изумрудные. У игрового экрана две палитры: «ночная» (холодная,
+ * синевато-чёрная, лунное серебро) и «дневная» (тёплая, коньячная, янтарь). Палитру выбирает
+ * атрибут data-phase="night|day" на контейнере; переменные --phase-* меняются вместе с ним.
+ *
+ * Те же значения для кода (цвета команд в заглушках карточек) — в src/theme/tokens.ts.
+ */
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-sans: 'Manrope Variable', 'Segoe UI', system-ui, sans-serif;
+
+  /* основа */
+  --color-ink: #09080b;
+  --color-coal: #121015;
+  --color-smoke: #1b181f;
+  --color-ash: #2a2530;
+  --color-paper: #f1e8d8;
+  --color-muted: #a99f8f;
+  --color-faint: #6d655c;
+
+  /* золото и бордо */
+  --color-gold-200: #f1dfa8;
+  --color-gold-300: #e5c878;
+  --color-gold-400: #d4ad4f;
+  --color-gold-500: #b8913a;
+  --color-gold-700: #7a5f24;
+  --color-wine-300: #c2475a;
+  --color-wine-400: #9c2236;
+  --color-wine-500: #7a1628;
+  --color-wine-700: #4a0c18;
+  --color-wine-900: #250610;
+
+  /* команды */
+  --color-team-red: #e2303f;
+  --color-team-red-deep: #7d0f1c;
+  --color-team-black: #0b0b0c;
+  --color-team-black-gold: #d6b25a;
+  --color-team-neutral: #c4ccd4;
+  --color-team-neutral-emerald: #2f9e7b;
+  --color-team-neutral-deep: #12392f;
+
+  /* состояния */
+  --color-ok: #4fb38a;
+  --color-warn: #e0a24a;
+  --color-danger: #e2484f;
+
+  --ease-noir: cubic-bezier(0.22, 0.8, 0.2, 1);
+
+  --shadow-card: 0 18px 40px -18px rgb(0 0 0 / 0.8), 0 2px 0 0 rgb(255 255 255 / 0.04) inset;
+  --shadow-glow-gold: 0 0 0 1px rgb(212 173 79 / 0.45), 0 10px 30px -10px rgb(212 173 79 / 0.45);
+}
+
+/* палитра фазы: переменные, которые меняются от ночи ко дню */
+@theme inline {
+  --color-phase-bg: var(--phase-bg);
+  --color-phase-panel: var(--phase-panel);
+  --color-phase-accent: var(--phase-accent);
+  --color-phase-soft: var(--phase-soft);
+}
+
+:root {
+  color-scheme: dark;
+  --phase-bg: #0d0b10;
+  --phase-panel: rgb(255 255 255 / 0.04);
+  --phase-accent: #d4ad4f;
+  --phase-soft: rgb(212 173 79 / 0.12);
+  --phase-gradient: radial-gradient(120% 70% at 50% -10%, #3a0e18 0%, #140c11 45%, #09080b 100%);
+}
+
+[data-phase='night'] {
+  --phase-bg: #060912;
+  --phase-panel: rgb(150 175 220 / 0.06);
+  --phase-accent: #a9bde0;
+  --phase-soft: rgb(169 189 224 / 0.12);
+  --phase-gradient: radial-gradient(90% 55% at 80% -5%, #1f2b4a 0%, #0b1020 42%, #05070d 100%);
+}
+
+[data-phase='day'] {
+  --phase-bg: #150f0b;
+  --phase-panel: rgb(255 214 160 / 0.06);
+  --phase-accent: #e8ae5c;
+  --phase-soft: rgb(232 174 92 / 0.13);
+  --phase-gradient: radial-gradient(110% 60% at 20% -10%, #5a2a16 0%, #24140d 45%, #0e0a08 100%);
+}
+
+[data-phase='ended'] {
+  --phase-accent: #e5c878;
+  --phase-gradient: radial-gradient(110% 60% at 50% -10%, #4b3812 0%, #1a130a 45%, #09080b 100%);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    height: 100%;
+  }
+  body {
+    @apply bg-ink font-sans text-paper antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  button {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  ::selection {
+    background: rgb(212 173 79 / 0.35);
+  }
+}
+
+@layer components {
+  /* фон экрана с палитрой фазы и лёгким «зерном» */
+  .scene-bg {
+    background: var(--phase-gradient);
+    background-attachment: fixed;
+  }
+  .grain::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .panel {
+    @apply rounded-2xl border border-white/8 bg-phase-panel backdrop-blur-sm;
+    box-shadow: var(--shadow-card);
+  }
+  .gold-text {
+    background: linear-gradient(180deg, #f6e6b4 0%, #d4ad4f 55%, #9c7a2e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hairline {
+    background: linear-gradient(90deg, transparent, rgb(212 173 79 / 0.55), transparent);
+    height: 1px;
+  }
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+  }
+  .safe-top {
+    padding-top: max(env(safe-area-inset-top), 0.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

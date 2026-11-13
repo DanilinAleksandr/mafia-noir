@@ -154,6 +154,7 @@ export class Room extends DurableObject<Env> {
       rev: 0,
       step: 0,
       sync: null,
+      discussion: false,
       stageDeadline: null,
       chat: [],
       chatSeq: 0,
@@ -454,6 +455,7 @@ export class Room extends DurableObject<Env> {
         room.game = null;
         room.players = [];
         room.sync = null;
+        room.discussion = false;
         room.stageDeadline = null;
         room.chat = [];
         this.touchRoom();
@@ -600,6 +602,7 @@ export class Room extends DurableObject<Env> {
     room.players = players.map((m) => m.id);
     room.game = created.state;
     room.sync = null;
+    room.discussion = false;
     room.chat = [];
     room.chatSeq = 0;
     room.step += 1;
@@ -647,7 +650,9 @@ export class Room extends DurableObject<Env> {
     const seconds =
       stage === 'night'
         ? room.settings.timers.night
-        : stage === 'day'
+        : stage === 'discussion'
+          ? room.settings.timers.discussion
+          : stage === 'day'
           ? room.settings.timers.day
           : stage === 'decision'
             ? room.settings.timers.decision
@@ -669,6 +674,18 @@ export class Room extends DurableObject<Env> {
     const room = this.room as RoomState;
     if (!room.sync) return;
     room.sync = null;
+    // утром начинается день — сперва обсуждение, голосование открывает хост или таймер
+    room.discussion = (room.game as GameState).phase === 'day';
+    room.step += 1;
+    this.setStageDeadline();
+    this.dirty = true;
+    this.gameTouched = true;
+  }
+
+  /** Закончить обсуждение и открыть голосование. */
+  private startVoting(): void {
+    const room = this.room as RoomState;
+    room.discussion = false;
     room.step += 1;
     this.setStageDeadline();
     this.dirty = true;
@@ -682,6 +699,9 @@ export class Room extends DurableObject<Env> {
     switch (stageOf(room)) {
       case 'night':
         this.resolve(resolveNight(game));
+        return;
+      case 'discussion':
+        this.startVoting();
         return;
       case 'day':
         this.resolve(resolveVote(game));

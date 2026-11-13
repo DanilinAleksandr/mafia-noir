@@ -433,7 +433,7 @@ describe('Настройки комнаты', () => {
     expect(table.host.room?.settings).toMatchObject({
       hostMode: 'player',
       display: 'stealth',
-      timers: { night: null, day: null, decision: null },
+      timers: { night: null, discussion: null, day: null, decision: null },
       composition: { roles: {}, quotas: {}, preset: null, minCiviliansShare: null },
     });
     expect(table.host.room?.settings.rules.votingMode).toBe('secret');
@@ -455,7 +455,7 @@ describe('Настройки комнаты', () => {
     await table.settle();
     expect(guest.room?.settings).toMatchObject({
       display: 'cinema',
-      timers: { night: 60, day: null, decision: null },
+      timers: { night: 60, discussion: null, day: null, decision: null },
       composition: { roles: { maniac: { enabled: false } }, quotas: { black: { exact: 1 } }, minCiviliansShare: 0.5 },
     });
     expect(guest.room?.settings.rules).toMatchObject({ votingMode: 'open', revealRoleOnDeath: false, announceSaves: true });

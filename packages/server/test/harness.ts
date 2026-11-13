@@ -53,6 +53,16 @@ export async function advanceClock(code: string, ms: number): Promise<boolean> {
   return runDurableObjectAlarm(stubOf(code));
 }
 
+/**
+ * Сбросить ограничение частоты сообщений (оно живёт в памяти объекта и считается по настоящим часам).
+ * Боты в тестах ходят намного быстрее людей; для них окно в 10 секунд «перематывается».
+ */
+export async function resetRateLimit(code: string): Promise<void> {
+  await runInDurableObject(stubOf(code), (instance: Room) => {
+    (instance as unknown as { rate: Map<string, unknown> }).rate.clear();
+  });
+}
+
 /** Усыпить объект: память сбрасывается, хранилище и соединения остаются. */
 export async function hibernate(code: string): Promise<void> {
   await evictDurableObject(stubOf(code));

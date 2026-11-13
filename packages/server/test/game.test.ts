@@ -169,7 +169,17 @@ describe('Утро: синхронизация перед днём', () => {
 
     await (table.clients[4] as Client).ok({ t: 'ready', step });
     await table.settle();
-    expect(table.host.game).toMatchObject({ stage: 'day', step: step + 1, deadline: null });
+    // день начинается с обсуждения: голоса ещё не принимаются
+    expect(table.host.game).toMatchObject({ stage: 'discussion', step: step + 1, deadline: null, progress: null });
+    expect(await table.host.request({ t: 'vote', target: 'm2' })).toMatchObject({ ok: false, code: 'WRONG_STAGE' });
+    // голосование открывает хост
+    expect(await (table.clients[1] as Client).request({ t: 'advance', step: step + 1 })).toMatchObject({
+      ok: false,
+      code: 'NOT_HOST',
+    });
+    await table.host.ok({ t: 'advance', step: step + 1 });
+    await table.settle();
+    expect(table.host.game).toMatchObject({ stage: 'day', step: step + 2, deadline: null });
     expect(await table.host.request({ t: 'vote', target: 'm2' })).toMatchObject({ ok: true });
     await table.closeAll();
   });
@@ -180,7 +190,7 @@ describe('Утро: синхронизация перед днём', () => {
     await table.tick(14_000);
     expect(table.host.game?.stage).toBe('morning');
     await table.tick(1_500);
-    expect(table.host.game?.stage).toBe('day');
+    expect(table.host.game?.stage).toBe('discussion');
     await table.closeAll();
   });
 
@@ -188,7 +198,7 @@ describe('Утро: синхронизация перед днём', () => {
     const table = await toMorning();
     await table.host.ok({ t: 'advance', step: table.host.game?.step ?? -1 });
     await table.settle();
-    expect(table.host.game?.stage).toBe('day');
+    expect(table.host.game?.stage).toBe('discussion');
     await table.closeAll();
   });
 
@@ -198,16 +208,29 @@ describe('Утро: синхронизация перед днём', () => {
     for (const client of table.clients.slice(0, 4)) await client.ok({ t: 'ready', step });
     await (table.clients[4] as Client).close();
     await table.settle();
-    expect(table.host.game?.stage).toBe('day');
+    expect(table.host.game?.stage).toBe('discussion');
     await table.closeAll();
   });
 
-  it('с таймером дня отсчёт начинается с начала дня, а не с конца ночи', async () => {
+  it('с таймером голосования отсчёт начинается с начала голосования, а не с конца ночи', async () => {
     const table = await toMorning({ timers: { day: 60 } });
     await allReady(table);
     const game = table.host.game;
     expect(game?.stage).toBe('day');
     expectDeadline(game, 60_000);
+    await table.closeAll();
+  });
+
+  it('по таймеру обсуждения голосование начинается само', async () => {
+    const table = await toMorning({ timers: { discussion: 30, day: 60 } });
+    await allReady(table, { keepDiscussion: true });
+    expect(table.host.game?.stage).toBe('discussion');
+    expectDeadline(table.host.game, 30_000);
+    await table.tick(29_000);
+    expect(table.host.game?.stage).toBe('discussion');
+    await table.tick(1_500);
+    expect(table.host.game?.stage).toBe('day');
+    expectDeadline(table.host.game, 60_000);
     await table.closeAll();
   });
 });

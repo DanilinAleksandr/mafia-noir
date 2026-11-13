@@ -40,10 +40,12 @@ export interface BotMemory {
   readyStep: number;
   /** Круг, в котором бот-мафиози уже написал в чат. */
   chatRound: number;
+  /** Шаг, на котором бот-хост уже открыл голосование. */
+  voteStep: number;
 }
 
 export function newBotMemory(): BotMemory {
-  return { readyStep: -1, chatRound: 0 };
+  return { readyStep: -1, chatRound: 0, voteStep: -1 };
 }
 
 const CHAT_LINES = ['кого берём?', 'предлагаю того, кто слева', 'только не меня', 'согласен', 'тихо, за нами следят'];
@@ -52,8 +54,20 @@ const CHAT_LINES = ['кого берём?', 'предлагаю того, кто
  * Следующее сообщение бота или null, если сейчас от него ничего не требуется.
  * После отправки сообщения функцию вызывают снова — уже с новым снимком.
  */
-export function botMove(game: GameSnapshot, memory: BotMemory, random: Random): ClientMessage | null {
+export function botMove(
+  game: GameSnapshot,
+  memory: BotMemory,
+  random: Random,
+  options: { isHost?: boolean } = {},
+): ClientMessage | null {
   const view = game.view;
+
+  // обсуждение днём: голосование открывает хост
+  if (game.stage === 'discussion') {
+    if (!options.isHost || memory.voteStep === game.step) return null;
+    memory.voteStep = game.step;
+    return { t: 'advance', step: game.step };
+  }
 
   // утро и вечер: клиент «досмотрел» итоги ночи или приговор
   if (game.stage === 'morning' || game.stage === 'evening') {

@@ -147,7 +147,7 @@ describe('Настройки комнаты', () => {
     expect(defaultRoomSettings()).toEqual({
       hostMode: 'player',
       display: 'stealth',
-      timers: { night: null, day: null, decision: null },
+      timers: { night: null, discussion: null, day: null, decision: null },
       rules: DEFAULT_RULES,
       composition: { roles: {}, quotas: {}, preset: null, minCiviliansShare: null },
     });
@@ -168,7 +168,7 @@ describe('Настройки комнаты', () => {
     expect(JSON.stringify(before)).toBe(snapshot);
     expect(after).toMatchObject({
       display: 'open',
-      timers: { night: null, day: 120, decision: null },
+      timers: { night: null, discussion: null, day: 120, decision: null },
       composition: { roles: { maniac: { enabled: false }, doctor: { max: 2 } }, quotas: {}, preset: ['mafia', 'civilian'] },
     });
     expect(after.rules).toEqual({ ...DEFAULT_RULES, votingMode: 'open' });

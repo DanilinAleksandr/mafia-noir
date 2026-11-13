@@ -12,11 +12,18 @@
     "test:engine": "npm run test --workspace @mafia/engine",
     "test:protocol": "npm run test --workspace @mafia/protocol",
     "test:server": "npm run test --workspace @mafia/server",
+    "test:web": "npm run test --workspace @mafia/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "dev": "npm run dev --workspace @mafia/server",
+    "dev": "concurrently --kill-others --names server,web --prefix-colors yellow,cyan \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run dev --workspace @mafia/server",
+    "dev:web": "npm run dev --workspace @mafia/web",
+    "build": "npm run build --workspace @mafia/web",
+    "e2e": "npm run e2e --workspace @mafia/web",
+    "screens": "npm run screens --workspace @mafia/web",
     "bots": "npm run bots --workspace @mafia/server --"
   },
   "devDependencies": {
+    "concurrently": "^10.0.7",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
