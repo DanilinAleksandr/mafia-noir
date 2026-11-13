@@ -58,6 +58,7 @@ import { LIMITS_SERVER, ROOM_STATE_VERSION, type Member, type RoomState, type So
 
 export interface Env {
   ROOM: DurableObjectNamespace<Room>;
+  GATE: DurableObjectNamespace<import('./gate').Gate>;
 }
 
 /** Ошибка, которую нужно вернуть клиенту как есть. */

@@ -2,5 +2,6 @@
 declare namespace Cloudflare {
   interface Env {
     ROOM: DurableObjectNamespace<import('./room').Room>;
+    GATE: DurableObjectNamespace<import('./gate').Gate>;
   }
 }

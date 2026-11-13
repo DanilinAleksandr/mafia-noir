@@ -28,6 +28,11 @@ export const LIMITS_SERVER = {
   attemptsLockMs: 10 * MINUTE,
   /** Одновременных соединений с комнатой (включая ещё не вошедших). */
   maxSockets: 60,
+  /** Создание комнат (Gate): с одного адреса и всего. */
+  roomsPerIpPer10Min: 6,
+  roomsPerIpPerDay: 30,
+  roomsPerHour: 120,
+  roomsPerDay: 600,
   /** Сообщений чата мафии, хранимых за партию. */
   chatHistory: 200,
   /** Не больше стольких сообщений от одного участника за окно. */

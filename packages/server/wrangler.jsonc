@@ -1,15 +1,32 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "mafia-online",
+  // один Worker: клиент (статика) и API/WebSocket по одному адресу — https://mafia-noir.<аккаунт>.workers.dev
+  "name": "mafia-noir",
   "main": "src/index.ts",
   // не новее версии workerd, которая стоит локально
   "compatibility_date": "2026-10-01",
+  // клиент: собранный Vite (npm run build). Worker вызывается только для /api/*,
+  // остальные адреса — файлы клиента, а неизвестные пути (например, /r/КОД) — index.html
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // режим разработки: отладочная страница и любой Origin — только в `wrangler dev` (передаёт true)
+  "define": { "__DEV__": "false" },
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+    "bindings": [
+      { "name": "ROOM", "class_name": "Room" },
+      { "name": "GATE", "class_name": "Gate" }
+    ]
   },
   // SQLite-хранилище: единственный вид Durable Objects на бесплатном плане
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
-  // локальная разработка: никаких обращений к Cloudflare
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Gate"] }
+  ],
+  // журналы и метрики в панели Cloudflare (в том числе процессорное время вызовов)
+  "observability": { "enabled": true },
   "send_metrics": false,
   "dev": { "port": 8787, "ip": "127.0.0.1" }
 }

@@ -1,0 +1,38 @@
+# Откат на предыдущую (или указанную) версию Worker — вручную из вкладки Actions.
+# Откатывается и код, и клиент: статика входит в версию Worker.
+# Миграции Durable Objects не откатываются (их и нет в обычных правках).
+name: Откат
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_id:
+        description: 'ID версии (пусто — предыдущая стабильная). Список: wrangler versions list'
+        required: false
+        default: ''
+
+jobs:
+  rollback:
+    name: wrangler rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Список версий
+        working-directory: packages/server
+        run: npx wrangler versions list
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Откат
+        working-directory: packages/server
+        run: npx wrangler rollback ${{ inputs.version_id }} --message "Откат из GitHub Actions (${{ github.actor }})"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

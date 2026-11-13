@@ -88,9 +88,9 @@ function onMessage(m, raw) {
     S.me = m.memberId;
     if (m.token) sessionStorage.setItem(tokenKey(S.code), m.token);
     S.room = m.room; S.game = m.game; S.events = m.history.slice(); S.scenes = m.scenes.slice(); S.chat = m.chat.slice();
-    history.replaceState(null, '', '/r/' + S.code);
+    history.replaceState(null, '', '/api/debug?r=' + S.code);
     $('entry').hidden = true; $('app').hidden = false;
-    status('Вы в комнате ' + S.code + ' как ' + nameOf(S.me) + ' (' + S.me + '). Ссылка: ' + location.origin + '/r/' + S.code);
+    status('Вы в комнате ' + S.code + ' как ' + nameOf(S.me) + ' (' + S.me + '). Ссылка: ' + location.origin + '/api/debug?r=' + S.code);
   } else if (m.t === 'room') {
     S.room = m.room;
     if (m.room.stage === 'lobby') { S.game = null; S.events = []; S.scenes = []; S.chat = []; }
@@ -257,9 +257,9 @@ document.addEventListener('click', function (event) {
   }
 });
 
-// ссылка вида /r/КОД: подставляем код и, если во вкладке есть токен, переподключаемся
+// ссылка вида /api/debug?r=КОД: подставляем код и, если во вкладке есть токен, переподключаемся
 (function () {
-  var match = /^\/r\/([^/]+)/.exec(location.pathname);
+  var match = /[?&]r=([^&]+)/.exec(location.search);
   if (!match) return;
   var code = decodeURIComponent(match[1]).toUpperCase();
   $('j-code').value = code;

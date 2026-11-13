@@ -2,7 +2,9 @@ import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { PROTOCOL_VERSION, ROOM_CODE_ALPHABET } from '@mafia/protocol';
 import type { Room } from '../src/room';
-import { Client, Table, advanceClock, createRoom, http, roomState, storedRoom, stubOf } from './harness';
+import type { Gate } from '../src/gate';
+import { env } from 'cloudflare:workers';
+import { Client, ORIGIN, Table, advanceClock, createRoom, http, roomState, storedRoom, stubOf } from './harness';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -68,7 +70,7 @@ describe('Создание комнаты', () => {
     expect(text).not.toContain('очень-секретный-пароль');
     expect(text).not.toContain(created.token);
     expect(text).not.toContain(guest.token as string);
-    expect(stored?.password.iterations).toBe(100_000);
+    expect(stored?.password.iterations).toBe(10_000);
     expect(stored?.password.hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(stored?.password.salt).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect(stored?.members.map((m) => m.tokenHash.length)).toEqual([64, 64]);
@@ -86,7 +88,8 @@ describe('Создание комнаты', () => {
     const { code } = await createRoom();
     const info = await http(`/api/rooms/${code.toLowerCase()}`);
     expect(await info.json()).toEqual({ code, stage: 'lobby', members: 1, joinable: true });
-    expect(info.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    // клиент и API на одном адресе — CORS не открыт
+    expect(info.headers.get('Access-Control-Allow-Origin')).toBeNull();
 
     for (const missing of ['ZZZZZ', 'абвгд', 'A', 'O0O0O']) {
       const response = await http(`/api/rooms/${encodeURIComponent(missing)}`);
@@ -96,14 +99,71 @@ describe('Создание комнаты', () => {
     expect((await http('/api/rooms/ZZZZZ/ws', { headers: { Upgrade: 'websocket' } })).status).toBe(404);
   });
 
-  it('отладочная страница открывается по / и по ссылке /r/КОД', async () => {
-    for (const path of ['/', '/r/ABCDE']) {
-      const response = await http(path);
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Content-Type')).toContain('text/html');
-      expect((await response.text()).toLowerCase()).toContain('<!doctype html>');
+  it('отладочной страницы в боевой сборке нет; неизвестные адреса API — 404', async () => {
+    // тесты собираются с __DEV__ = false, как при деплое
+    expect((await http('/api/debug')).status).toBe(404);
+    expect((await http('/api/что-то-другое')).status).toBe(404);
+  });
+
+  it('слишком большое тело запроса на создание комнаты отклоняется до разбора', async () => {
+    const response = await http('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Хост', password: 'x'.repeat(5000) }),
+    });
+    expect(response.status).toBe(413);
+  });
+});
+
+describe('Защита перед публикацией', () => {
+  const create = (ip: string | null) =>
+    http('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(ip ? { 'CF-Connecting-IP': ip } : {}) },
+      body: JSON.stringify({ name: 'Хост', password: '1' }),
+    });
+
+  it('с одного адреса — не больше 6 комнат за 10 минут, потом 429 с Retry-After', async () => {
+    for (let i = 0; i < 6; i++) expect((await create('203.0.113.7')).status).toBe(201);
+    const refused = await create('203.0.113.7');
+    expect(refused.status).toBe(429);
+    expect(((await refused.json()) as { error: { code: string } }).error.code).toBe('TOO_MANY_ROOMS');
+    expect(Number(refused.headers.get('Retry-After'))).toBeGreaterThan(0);
+    // другой адрес не страдает
+    expect((await create('203.0.113.8')).status).toBe(201);
+    // через 10 минут — снова можно
+    await runInDurableObject(env.GATE.get(env.GATE.idFromName('gate')), (gate: Gate) => {
+      gate.skewMs += 11 * 60_000;
+    });
+    expect((await create('203.0.113.7')).status).toBe(201);
+  });
+
+  it('общий предел на все адреса', async () => {
+    await runInDurableObject(env.GATE.get(env.GATE.idFromName('gate')), async (gate: Gate, state) => {
+      gate.skewMs += 2 * 24 * 60 * 60_000;
+      await state.storage.deleteAll();
+      await state.storage.put('all:hour', { start: Date.now() + gate.skewMs, count: 120 });
+    });
+    const refused = await create('198.51.100.1');
+    expect(refused.status).toBe(429);
+    // счётчики общие на файл тестов — убираем за собой
+    await runInDurableObject(env.GATE.get(env.GATE.idFromName('gate')), async (_gate: Gate, state) => {
+      await state.storage.deleteAll();
+    });
+  });
+
+  it('WebSocket с чужой страницы не открывается; со своей и без Origin — открывается', async () => {
+    const { code } = await createRoom();
+    const ws = (origin?: string) =>
+      http(`/api/rooms/${code}/ws`, { headers: { Upgrade: 'websocket', ...(origin ? { Origin: origin } : {}) } });
+    const evil = await ws('https://evil.example');
+    expect(evil.status).toBe(403);
+    expect(((await evil.json()) as { error: { code: string } }).error.code).toBe('BAD_ORIGIN');
+    for (const ok of [await ws(ORIGIN), await ws()]) {
+      expect(ok.status).toBe(101);
+      ok.webSocket?.accept();
+      ok.webSocket?.close();
     }
-    expect((await http('/что-то-другое')).status).toBe(404);
   });
 });
 
