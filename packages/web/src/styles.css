@@ -144,6 +144,11 @@
     background: linear-gradient(90deg, transparent, rgb(212 173 79 / 0.55), transparent);
     height: 1px;
   }
+  /* слой карточки, смещаемый наклоном голограммы: --tilt-x/--tilt-y от −1 до 1, --depth — глубина */
+  .holo-layer {
+    transform: translate3d(calc(var(--tilt-x, 0) * var(--depth, 0px)), calc(var(--tilt-y, 0) * var(--depth, 0px)), 0);
+    will-change: transform;
+  }
   .safe-bottom {
     padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
   }

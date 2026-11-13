@@ -19,6 +19,14 @@ import type {
 import { type Auth, type CloseInfo, type ConnectionStatus, type Reply, RoomConnection, type SocketFactory } from '../net/connection';
 import { forgetSession, readyStep, rememberReady, rememberSeen, storeSession, wasSeen } from '../net/session';
 import { type Presentation, Presenter } from '../presenter/presenter';
+import { vibrate } from '../settings/haptics';
+
+/** Личная заметка игрока (блокнот у тех, у кого нет чата мафии). Хранится только на устройстве. */
+export interface Note {
+  id: number;
+  text: string;
+  at: number;
+}
 
 export interface Toast {
   id: number;
@@ -40,8 +48,9 @@ export interface RoomViewState {
   clockOffset: number;
   toast: Toast | null;
   presentation: Presentation | null;
-  /** Сколько сообщений чата не прочитано. */
+  /** Сколько сообщений чата не прочитано (на экран не выводится: значок выдал бы мафию). */
   unreadChat: number;
+  notes: Note[];
 }
 
 /** Коды, при которых сессию нужно забыть: войти с ней снова не получится. */
@@ -76,6 +85,7 @@ export class RoomStore {
       toast: null,
       presentation: null,
       unreadChat: 0,
+      notes: loadNotes(code),
     };
     this.presenter = new Presenter((done) => this.onPresentationDone(done));
     this.presenter.subscribe(() => this.set({ presentation: this.presenter.current }));
@@ -166,6 +176,7 @@ export class RoomStore {
           // партия закончилась или прервана: всё, что относилось к ней, забываем
           this.presenter.reset();
           this.set({ room: message.room, game: null, events: [], scenes: [], chat: [], unreadChat: 0 });
+          this.clearNotes();
           return;
         }
         this.set({ room: message.room });
@@ -178,7 +189,10 @@ export class RoomStore {
         }
         const startedNew = message.events.some((e) => e.type === 'gameStarted');
         const base = startedNew ? [] : this.state.events;
-        if (startedNew) this.presenter.reset();
+        if (startedNew) {
+          this.presenter.reset();
+          this.clearNotes();
+        }
         const known = new Set(base.map((e) => e.id));
         const fresh = message.events.filter((e) => !known.has(e.id));
         const scenes = startedNew ? message.scenes : mergeScenes(this.state.scenes, message.scenes);
@@ -195,6 +209,8 @@ export class RoomStore {
       }
       case 'chat': {
         if (this.state.chat.some((m) => m.id === message.message.id)) return;
+        // о новом сообщении команды — только вибрацией: значок на кнопке увидел бы сосед
+        if (!this.chatOpen && message.message.from !== this.state.memberId) vibrate('notify');
         this.set({
           chat: [...this.state.chat, message.message],
           unreadChat: this.chatOpen || message.message.from === this.state.memberId ? 0 : this.state.unreadChat + 1,
@@ -303,6 +319,18 @@ export class RoomStore {
     return this.send({ t: 'chat', text });
   }
 
+  addNote(text: string): void {
+    const notes = [...this.state.notes, { id: Date.now(), text, at: Date.now() }].slice(-100);
+    saveNotes(this.state.code, notes);
+    this.set({ notes });
+  }
+
+  private clearNotes(): void {
+    if (this.state.notes.length === 0) return;
+    saveNotes(this.state.code, []);
+    this.set({ notes: [] });
+  }
+
   setChatOpen(open: boolean): void {
     this.chatOpen = open;
     if (open && this.state.unreadChat > 0) this.set({ unreadChat: 0 });
@@ -321,6 +349,28 @@ export class RoomStore {
   /** Подставить состояние напрямую (компонентные тесты и демонстрационные экраны). */
   inject(patch: Partial<RoomViewState>): void {
     this.set(patch);
+  }
+}
+
+function notesKey(code: string): string {
+  return `mafia.notes.${code}`;
+}
+
+function loadNotes(code: string): Note[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(notesKey(code)) ?? '[]');
+    return Array.isArray(parsed) ? (parsed as Note[]).filter((n) => n && typeof n.text === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveNotes(code: string, notes: Note[]): void {
+  try {
+    if (notes.length === 0) localStorage.removeItem(notesKey(code));
+    else localStorage.setItem(notesKey(code), JSON.stringify(notes));
+  } catch {
+    // без сохранения
   }
 }
 

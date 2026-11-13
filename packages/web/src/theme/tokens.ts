@@ -17,7 +17,7 @@ export interface TeamPalette {
 
 export const TEAM_PALETTE: Record<Team, TeamPalette> = {
   red: { primary: '#e2303f', deep: '#3d070e', trim: '#f2b8a0', ink: '#fff1ea' },
-  black: { primary: '#141414', deep: '#050505', trim: '#d6b25a', ink: '#f5e6bb' },
+  black: { primary: '#6b4e16', deep: '#0a0806', trim: '#d6b25a', ink: '#f5e6bb' },
   neutral: { primary: '#2f9e7b', deep: '#0b231d', trim: '#c4ccd4', ink: '#ecf4f1' },
 };
 

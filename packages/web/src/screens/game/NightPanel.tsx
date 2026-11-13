@@ -159,17 +159,10 @@ function MafiaVoteStep({ candidates }: { candidates: PlayerId[] }) {
   const view = game!.view;
   const name = useNames();
   const submitted = view.night!.submitted;
-  const teamVotes = view.night!.teamVotes ?? {};
   const done = submitted.mafiaVote !== undefined;
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState<PlayerId[]>([]);
   const [busy, setBusy] = useState(false);
-
-  const marks: Record<PlayerId, string> = {};
-  for (const [voter, target] of Object.entries(teamVotes)) {
-    if (!target) continue;
-    marks[target] = marks[target] ? `${marks[target]}, ${name(voter)}` : `← ${name(voter)}`;
-  }
 
   const send = async (target: PlayerId | null) => {
     setBusy(true);
@@ -184,9 +177,7 @@ function MafiaVoteStep({ candidates }: { candidates: PlayerId[] }) {
         testId="mafia-vote-done"
         detail={`${t.game.night.mafiaVote}: ${submitted.mafiaVote ? name(submitted.mafiaVote) : t.game.night.abstain.toLowerCase()}`}
         onChange={() => setEditing(true)}
-      >
-        <TeamVotes teamVotes={teamVotes} />
-      </DoneRow>
+      />
     );
   }
 
@@ -200,7 +191,6 @@ function MafiaVoteStep({ candidates }: { candidates: PlayerId[] }) {
         selected={selected}
         max={1}
         onChange={setSelected}
-        marks={marks}
         me={view.you?.id ?? null}
       />
       <div className="mt-4 flex gap-3">
@@ -251,20 +241,5 @@ function DoneRow({
       </div>
       {shown ? children : null}
     </Panel>
-  );
-}
-
-function TeamVotes({ teamVotes }: { teamVotes: Record<PlayerId, PlayerId | null> }) {
-  const name = useNames();
-  const entries = Object.entries(teamVotes);
-  if (entries.length === 0) return null;
-  return (
-    <ul className="mt-3 space-y-0.5 border-t border-white/8 pt-2 text-sm text-muted">
-      {entries.map(([voter, target]) => (
-        <li key={voter}>
-          {name(voter)} → {target ? name(target) : t.game.night.abstain.toLowerCase()}
-        </li>
-      ))}
-    </ul>
   );
 }

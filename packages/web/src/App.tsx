@@ -1,11 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense, lazy } from 'react';
 import { type Route, useRoute } from './router';
 import { CreateRoom } from './screens/CreateRoom';
 import { Home } from './screens/Home';
 import { JoinRoom } from './screens/JoinRoom';
 import { RolesPage } from './screens/RolesPage';
 import { RoomScreen } from './screens/RoomScreen';
+
+/** Витрина сцен — только в разработке; в сборку не попадает. */
+const ScenesLab = import.meta.env.DEV ? lazy(() => import('./dev/ScenesLab')) : null;
 
 function screenFor(route: Route): { key: string; node: ReactNode } {
   switch (route.name) {
@@ -19,6 +22,15 @@ function screenFor(route: Route): { key: string; node: ReactNode } {
       return { key: 'roles', node: <RolesPage /> };
     case 'room':
       return { key: `room-${route.code}`, node: <RoomScreen code={route.code} /> };
+    case 'devScenes':
+      return {
+        key: 'dev-scenes',
+        node: ScenesLab ? (
+          <Suspense fallback={null}>
+            <ScenesLab />
+          </Suspense>
+        ) : null,
+      };
   }
 }
 

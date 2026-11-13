@@ -28,6 +28,7 @@ export default defineConfig({
   projects: [
     { name: 'e2e', testMatch: /.*\.e2e\.ts/ },
     { name: 'screens', testMatch: /screens\.ts/ },
+    { name: 'sceneshots', testMatch: /sceneShots\.ts/ },
   ],
   webServer: [
     {

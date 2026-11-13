@@ -9,7 +9,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Page, expect, test } from '@playwright/test';
-import { ROOT, type Player, createRoom, joinByLink, newPlayer, startBots } from './helpers';
+import { ROOT, type Player, createRoom, joinByLink, newPlayer, startBots, takeRole } from './helpers';
 
 const OUT = join(ROOT, 'docs', 'screens');
 mkdirSync(OUT, { recursive: true });
@@ -18,16 +18,6 @@ async function shot(page: Page, name: string, options: { top?: boolean } = {}): 
   if (options.top) await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(700); // анимации появления
   await page.screenshot({ path: join(OUT, `${name}.png`), scale: 'css' });
-}
-
-/** Узнать свою роль: удержать карточку и прочитать название. */
-async function readRole(page: Page): Promise<string> {
-  const card = page.getByRole('button', { name: 'Удерживайте, чтобы посмотреть роль' });
-  await card.hover();
-  await page.mouse.down();
-  const role = (await page.getByTestId('revealed-role').textContent())?.trim() ?? '';
-  await page.mouse.up();
-  return role;
 }
 
 async function pick(page: Page, scopeText: RegExp | null, target: string, button: RegExp): Promise<void> {
@@ -90,7 +80,7 @@ test('скриншоты экранов', async ({ browser }) => {
 
   // роли по удержанию карточки
   const roleOf = new Map<string, Player>();
-  for (const p of players) roleOf.set(await readRole(p.page), p);
+  for (const p of players) roleOf.set(await takeRole(p.page), p);
   const by = (role: string) => {
     const p = roleOf.get(role);
     if (!p) throw new Error(`Нет роли ${role}: ${[...roleOf.keys()].join(', ')}`);
@@ -103,13 +93,10 @@ test('скриншоты экранов', async ({ browser }) => {
   const hunter = by('Охотник');
   const civ = by('Мирный житель');
 
-  // кадр с открытой карточкой мафии (сообщник виден)
-  const card = mafia.page.getByRole('button', { name: 'Удерживайте, чтобы посмотреть роль' });
-  await card.hover();
-  await mafia.page.mouse.down();
-  await shot(mafia.page, '08-role-held-mafia');
-  await mafia.page.mouse.up();
+  // кадр с открытой картой мафии (сообщник виден внизу)
+  await shot(mafia.page, '08-role-mafia');
   for (const p of players) await p.page.getByTestId('role-ok').click();
+  for (const p of players) await expect(p.page.locator('[data-scene="deck"]')).toHaveCount(0);
 
   // ── ночь 1 ──
   await shot(civ.page, '09-night-civilian');
@@ -117,13 +104,19 @@ test('скриншоты экранов', async ({ browser }) => {
   await pick(doctor.page, null, comm.name, /Сделать ход/);
   await pick(civ.page, null, mafia.name, /Сделать ход/);
   await pick(hunter.page, null, don.name, /Сделать ход/);
-  await mafia.page.getByRole('button', { name: 'Чат мафии' }).click();
-  await mafia.page.getByLabel('Сообщение команде…').fill(`Берём ${hunter.name}?`);
+  await mafia.page.getByRole('button', { name: 'Блокнот' }).click();
+  await mafia.page.getByLabel('Написать…').fill(`Берём ${hunter.name}?`);
   await mafia.page.getByRole('button', { name: 'Отправить' }).click();
-  await don.page.getByRole('button', { name: 'Чат мафии' }).click();
-  await don.page.getByLabel('Сообщение команде…').fill('Согласен. Тихо.');
+  await don.page.getByRole('button', { name: 'Блокнот' }).click();
+  await don.page.getByLabel('Написать…').fill('Согласен. Тихо.');
   await don.page.getByRole('button', { name: 'Отправить' }).click();
-  await shot(don.page, '11-mafia-chat');
+  await shot(don.page, '11-notebook-mafia');
+  // у мирного та же кнопка и тот же вид — только это личные заметки
+  await civ.page.getByRole('button', { name: 'Блокнот' }).click();
+  await civ.page.getByLabel('Написать…').fill(`${mafia.name} слишком спокоен`);
+  await civ.page.getByRole('button', { name: 'Отправить' }).click();
+  await shot(civ.page, '11b-notebook-civilian');
+  await civ.page.keyboard.press('Escape');
   await don.page.keyboard.press('Escape');
   await mafia.page.keyboard.press('Escape');
   await pick(mafia.page, null, hunter.name, /Сделать ход/);

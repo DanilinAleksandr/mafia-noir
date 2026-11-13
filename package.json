@@ -20,7 +20,8 @@
     "build": "npm run build --workspace @mafia/web",
     "e2e": "npm run e2e --workspace @mafia/web",
     "screens": "npm run screens --workspace @mafia/web",
-    "bots": "npm run bots --workspace @mafia/server --"
+    "bots": "npm run bots --workspace @mafia/server --",
+    "scene-shots": "npm run scene-shots --workspace @mafia/web"
   },
   "devDependencies": {
     "concurrently": "^10.0.7",

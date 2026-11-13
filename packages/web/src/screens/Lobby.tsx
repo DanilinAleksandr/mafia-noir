@@ -4,6 +4,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
 import { Screen } from '../App';
+import { PrefsSheet } from '../components/PrefsSheet';
 import { RoleReference } from '../components/RoleReference';
 import { Avatar } from '../components/players';
 import { IconBook, IconCog, IconCrown, IconDoor, IconEye, IconShare } from '../components/icons';
@@ -20,6 +21,7 @@ export function Lobby() {
   const { room, memberId } = useRoomState();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmNode, confirm] = useConfirm();
   if (!room) return null;
@@ -41,9 +43,14 @@ export function Lobby() {
           <IconDoor className="rotate-180" />
         </IconButton>
         <span className="text-xs font-bold tracking-[0.3em] text-muted uppercase">{t.lobby.title}</span>
-        <IconButton label={t.home.rules} onClick={() => setRolesOpen(true)}>
-          <IconBook />
-        </IconButton>
+        <span className="flex">
+          <IconButton label="Эффекты и звук" onClick={() => setPrefsOpen(true)}>
+            <IconCog />
+          </IconButton>
+          <IconButton label={t.home.rules} onClick={() => setRolesOpen(true)}>
+            <IconBook />
+          </IconButton>
+        </span>
       </header>
 
       <section className="mt-2 text-center">
@@ -205,6 +212,7 @@ export function Lobby() {
       <Sheet open={rolesOpen} onClose={() => setRolesOpen(false)} title={t.home.rules}>
         <RoleReference rules={room.settings.rules} />
       </Sheet>
+      <PrefsSheet open={prefsOpen} onClose={() => setPrefsOpen(false)} />
       {confirmNode}
     </Screen>
   );

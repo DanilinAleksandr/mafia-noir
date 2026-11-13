@@ -446,6 +446,12 @@ export const ru = {
       evening: 'Начать ночь',
       ended: '',
     } satisfies Record<GameStage, string>,
+    notebook: {
+      title: 'Блокнот',
+      placeholder: 'Написать…',
+      send: 'Отправить',
+      empty: 'Пока пусто.',
+    },
     night: {
       title: (n: number) => `Ночь ${n}`,
       subtitle: 'Город засыпает',

@@ -58,6 +58,15 @@ async function clickIfVisible(page: Page, selector: string): Promise<boolean> {
 
 /** Выбрать в сетке первых доступных игроков и нажать главную кнопку панели. */
 async function playPicker(scope: ReturnType<Page['locator']>, mainButton: RegExp): Promise<boolean> {
+  try {
+    return await playPickerUnsafe(scope, mainButton);
+  } catch {
+    // экран сменился посреди хода (пришёл новый снимок) — попробуем на следующем круге
+    return false;
+  }
+}
+
+async function playPickerUnsafe(scope: ReturnType<Page['locator']>, mainButton: RegExp): Promise<boolean> {
   const options = scope.locator('[role="option"][aria-disabled="false"]');
   const count = await options.count();
   const main = scope.getByRole('button', { name: mainButton });
@@ -65,26 +74,47 @@ async function playPicker(scope: ReturnType<Page['locator']>, mainButton: RegExp
     // выбрать некого — пропуск / воздержаться
     const skip = scope.getByRole('button', { name: /Пропустить|Воздержаться|Не стрелять/ });
     if (await skip.count()) {
-      await skip.first().click();
+      await skip.first().click({ timeout: 3000 });
       return true;
     }
     return false;
   }
   // случайная цель, чтобы партии отличались; двухцелевые способности — две цели
   const first = Math.floor(Math.random() * count);
-  await options.nth(first).click();
+  await options.nth(first).click({ timeout: 3000 });
   if ((await main.count()) === 0) return false;
-  if (await main.isDisabled({ timeout: 2000 })) await options.nth((first + 1) % count).click();
+  if (await main.isDisabled({ timeout: 2000 })) await options.nth((first + 1) % count).click({ timeout: 3000 });
   if (await main.isDisabled({ timeout: 2000 })) return false;
-  await main.click();
+  await main.click({ timeout: 3000 });
   return true;
 }
 
 export type StepResult = 'acted' | 'idle' | 'final';
 
+/**
+ * Сцена «Колода»: тапы ведут её дальше (к колоде, взять карту, к концу), потом «Спрятать».
+ * Возвращает название роли (из открытой карты).
+ */
+export async function takeRole(page: Page): Promise<string> {
+  const scene = page.locator('[data-scene="deck"]');
+  await expect(scene).toBeVisible();
+  const ok = page.getByTestId('role-ok');
+  for (let i = 0; i < 8 && !(await ok.isVisible()); i++) {
+    await scene.click({ position: { x: 30, y: 120 } });
+    await page.waitForTimeout(250);
+  }
+  await expect(ok).toBeVisible();
+  return (await page.getByTestId('revealed-role').getAttribute('aria-label')) ?? '';
+}
+
 /** Один ход вкладки-игрока: досмотреть сцену, сходить ночью, проголосовать, решить. */
 export async function playStep(page: Page, options: { host?: boolean } = {}): Promise<StepResult> {
   if (await clickIfVisible(page, '[data-testid="role-ok"]')) return 'acted';
+  if (await visible(page, '[data-scene="deck"]')) {
+    // тап по сцене: к колоде → взять карту → к концу
+    await page.locator('[data-scene="deck"]').click({ position: { x: 30, y: 120 }, timeout: 3000 }).catch(() => undefined);
+    return 'acted';
+  }
   if (await clickIfVisible(page, '[data-testid="report-ready"]')) return 'acted';
   if (await clickIfVisible(page, '[data-testid="finale-ok"]')) return 'acted';
   if (await visible(page, '[data-testid="final"]')) return 'final';
@@ -140,7 +170,19 @@ export async function playUntilEnd(pages: Page[], hostPage: Page, limitMs = 200_
     if (finals === pages.length) return;
     if (Date.now() - started > limitMs) {
       const dump: string[] = [];
-      for (const page of pages) dump.push((await page.locator('body').innerText().catch(() => '')).slice(0, 1500));
+      for (const [i, page] of pages.entries()) {
+        await page.screenshot({ path: `test-results/stuck-${i}.png` }).catch(() => undefined);
+        const deck = await page
+          .evaluate(() => {
+            const el = document.querySelector('[data-scene="deck"]');
+            if (!el) return 'нет колоды';
+            const cs = getComputedStyle(el);
+            return `колода: visibility=${cs.visibility} opacity=${cs.opacity} parentOpacity=${getComputedStyle(el.parentElement!.parentElement!).opacity}`;
+          })
+          .catch(() => '?');
+        dump.push(`${deck}
+${(await page.locator('body').innerText().catch(() => '')).slice(0, 800)}`);
+      }
       throw new Error(`Партия не закончилась вовремя. Экраны:\n${dump.join('\n──────\n')}`);
     }
     idleRounds = acted ? 0 : idleRounds + 1;

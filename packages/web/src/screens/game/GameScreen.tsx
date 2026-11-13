@@ -4,12 +4,13 @@
  */
 import type { GameStage } from '@mafia/protocol';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Countdown } from '../../components/Countdown';
 import { HoldToReveal } from '../../components/HoldToReveal';
 import { Journal } from '../../components/Journal';
+import { PrefsSheet } from '../../components/PrefsSheet';
 import { RoleReference } from '../../components/RoleReference';
-import { IconBook, IconCard, IconChat, IconCrown, IconMoon, IconScroll, IconSun } from '../../components/icons';
+import { IconBook, IconCard, IconChat, IconCog, IconCrown, IconMoon, IconScroll, IconSun } from '../../components/icons';
 import { Button, IconButton, Sheet, Spinner, useConfirm } from '../../components/ui';
 import { roleName, t } from '../../i18n';
 import { PresenterHost } from '../../presenter/PresenterHost';
@@ -17,7 +18,7 @@ import { useRoomState, useStore } from '../../store/context';
 import { DecisionPanel } from './DecisionPanel';
 import { DiscussionPanel, VotePanel } from './DayPanels';
 import { FinalPanel } from './FinalPanel';
-import { MafiaChat } from './MafiaChat';
+import { Notebook } from './MafiaChat';
 import { NarratorScreen } from './NarratorScreen';
 import { NightPanel } from './NightPanel';
 import { SyncPanel } from './SyncPanel';
@@ -53,11 +54,10 @@ function PlayerGame() {
   const name = useNames();
   const isHost = state.room?.hostId === state.memberId;
   const phase = phaseOf(game.stage, view.phase);
-  const [sheet, setSheet] = useState<'role' | 'journal' | 'roles' | 'chat' | 'host' | null>(null);
+  const [sheet, setSheet] = useState<'role' | 'journal' | 'roles' | 'chat' | 'host' | 'prefs' | null>(null);
   const [confirmNode, confirm] = useConfirm();
+  const setChatOpen = useCallback((open: boolean) => store.setChatOpen(open), [store]);
 
-  const blackAlive = Boolean(you?.alive && you.team === 'black');
-  const chatAvailable = blackAlive && (game.stage === 'night' || state.chat.length > 0);
   const teammates = view.players.filter((p) => p.team === 'black' && p.id !== you?.id && you?.team === 'black');
 
   return (
@@ -75,8 +75,9 @@ function PlayerGame() {
               </div>
             </div>
             <Countdown deadline={game.deadline} clockOffset={state.clockOffset} />
-            {chatAvailable ? (
-              <IconButton label={t.game.night.chat} badge={state.unreadChat} onClick={() => setSheet('chat')}>
+            {/* блокнот — у всех: у чёрных за ним чат команды, у остальных заметки */}
+            {you && game.stage !== 'ended' ? (
+              <IconButton label={t.game.notebook.title} onClick={() => setSheet('chat')}>
                 <IconChat />
               </IconButton>
             ) : null}
@@ -85,6 +86,9 @@ function PlayerGame() {
             </IconButton>
             <IconButton label={t.game.reference} onClick={() => setSheet('roles')}>
               <IconBook />
+            </IconButton>
+            <IconButton label="Эффекты и звук" onClick={() => setSheet('prefs')}>
+              <IconCog />
             </IconButton>
             {isHost ? (
               <IconButton label={t.game.hostMenu} onClick={() => setSheet('host')}>
@@ -149,9 +153,10 @@ function PlayerGame() {
       <Sheet open={sheet === 'roles'} onClose={() => setSheet(null)} title={t.game.reference}>
         <RoleReference rules={view.rules} composition={game.composition} highlight={you?.role ?? null} />
       </Sheet>
-      <Sheet open={sheet === 'chat'} onClose={() => setSheet(null)} title={t.game.night.chat}>
-        <MafiaChat onOpenChange={(open) => store.setChatOpen(open)} />
+      <Sheet open={sheet === 'chat'} onClose={() => setSheet(null)} title={t.game.notebook.title}>
+        <Notebook onOpenChange={setChatOpen} />
       </Sheet>
+      <PrefsSheet open={sheet === 'prefs'} onClose={() => setSheet(null)} />
       <Sheet open={sheet === 'host'} onClose={() => setSheet(null)} title={t.game.hostMenu}>
         <HostMenu
           onAdvance={() => {

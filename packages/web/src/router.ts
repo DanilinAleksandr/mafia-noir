@@ -14,7 +14,9 @@ export type Route =
   | { name: 'create' }
   | { name: 'join'; code: string | null }
   | { name: 'room'; code: string }
-  | { name: 'roles' };
+  | { name: 'roles' }
+  /** Только в разработке: витрина сцен. */
+  | { name: 'devScenes' };
 
 export function parseRoute(pathname: string, search = ''): Route {
   const room = /^\/r\/([^/]+)\/?$/.exec(pathname);
@@ -25,6 +27,7 @@ export function parseRoute(pathname: string, search = ''): Route {
   if (pathname === '/create') return { name: 'create' };
   if (pathname === '/join') return { name: 'join', code: normalizeRoomCode(new URLSearchParams(search).get('code')) };
   if (pathname === '/roles') return { name: 'roles' };
+  if (import.meta.env.DEV && pathname === '/dev/scenes') return { name: 'devScenes' };
   return { name: 'home' };
 }
 

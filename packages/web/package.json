@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "e2e": "playwright test",
-    "screens": "playwright test --project=screens"
+    "screens": "playwright test --project=screens",
+    "scene-shots": "playwright test --project=sceneshots"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",
@@ -20,6 +21,8 @@
     "@mafia/engine": "*",
     "@mafia/protocol": "*",
     "framer-motion": "^14.13.0",
+    "gsap": "^3.15.1",
+    "howler": "^2.2.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
@@ -29,6 +32,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
+    "@types/howler": "^2.2.13",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
